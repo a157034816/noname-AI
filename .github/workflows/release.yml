@@ -21,13 +21,20 @@ jobs:
         with:
           python-version: "3.x"
 
-      - name: Build 身临其境的AI.zip
+      - name: Compute ZIP name
+        id: vars
         run: |
-          python .github/scripts/build_release_zip.py --whitelist release-whitelist.txt --output dist/身临其境的AI.zip --root-name 身临其境的AI
+          ZIP_BASENAME="身临其境的AI-${GITHUB_REF_NAME//\//-}"
+          echo "zip_basename=${ZIP_BASENAME}" >> $GITHUB_OUTPUT
+          echo "zip_path=dist/${ZIP_BASENAME}.zip" >> $GITHUB_OUTPUT
+
+      - name: Build ${{ steps.vars.outputs.zip_basename }}.zip
+        run: |
+          python .github/scripts/build_release_zip.py --whitelist release-whitelist.txt --output "${{ steps.vars.outputs.zip_path }}" --root-name 身临其境的AI
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/身临其境的AI.zip
+          files: ${{ steps.vars.outputs.zip_path }}
           fail_on_unmatched_files: true
           generate_release_notes: true
