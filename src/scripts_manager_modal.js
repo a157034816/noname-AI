@@ -269,7 +269,7 @@ function safeNewUrl(rel, base) {
  * @param {{title:string, subtitle?:string, ui?: any}} opts
  * @returns {{ shadow: ShadowRoot, close: Function, setStatus: (text: string) => void }}
  */
-function createModalShell(opts) {
+export function createModalShell(opts) {
   const existing = document.getElementById(ROOT_ID);
   if (existing) {
     try {

@@ -3,6 +3,9 @@ import { installPersonaSystem } from "./src/ai_persona/index.js";
 import { installEmotionThrowEvent } from "./src/ai_persona/emotion_throw_event.js";
 import { loadExtensionScripts } from "./src/scripts_loader.js";
 import { openScriptsPluginManagerModal } from "./src/scripts_manager_modal.js";
+import { maybeAutoCheckForUpdates } from "./src/update/auto_check.js";
+import { openUpdateModal } from "./src/update/update_modal.js";
+import { SLQJ_AI_EXTENSION_VERSION } from "./src/version.js";
 export const type = "extension";
 
 /**
@@ -70,6 +73,15 @@ export default function(){
 	}catch(e){
 		console.error("[身临其境的AI] loadExtensionScripts failed", e);
 	}
+
+		/** 自动检查更新（节流；发现新版本仅提示控制台，需手动在设置里打开“检查更新/更新”）。 */
+		try{
+			maybeAutoCheckForUpdates({ baseUrl: import.meta.url, lib, game, config, currentVersion: SLQJ_AI_EXTENSION_VERSION, connectMode: _status && _status.connectMode }).catch(function(e){
+				console.error("[身临其境的AI] maybeAutoCheckForUpdates failed", e);
+			});
+		}catch(e){
+			console.error("[身临其境的AI] maybeAutoCheckForUpdates failed", e);
+		}
 },config:{
 	slqj_ai_inspect_lang:{
 		name:'AI标记用语',
@@ -204,6 +216,36 @@ export default function(){
 			}
 		},
 	},
+	slqj_ai_update_auto_check:{
+		name:'启动时自动检查更新',
+		intro:'开启后会在启动时（节流）从 GitHub Releases 检查新版本；发现更新不会自动下载，需要在“检查更新/更新”里确认后才会覆盖更新（默认：开启）',
+		init: lib.config.slqj_ai_update_auto_check===undefined?true:lib.config.slqj_ai_update_auto_check,
+		/**
+		 * @param {boolean} bool
+		 * @returns {void}
+		 */
+		onclick:function(bool){
+			game.saveConfig('extension_身临其境的AI_slqj_ai_update_auto_check',bool);
+			game.saveConfig('slqj_ai_update_auto_check',bool);
+		},
+	},
+	slqj_ai_update_check:{
+		name:'检查更新/更新',
+		intro:'打开更新弹窗：检查最新版本并可一键下载覆盖更新（自动更新仅在支持写文件的环境可用；更新后需重启生效）',
+		clear:true,
+		/**
+		 * @returns {void}
+		 */
+		onclick:function(){
+			try{
+				openUpdateModal({ baseUrl: import.meta.url, lib, game, ui, config: lib.config, currentVersion: SLQJ_AI_EXTENSION_VERSION }).catch(function(e){
+					console.error("[身临其境的AI] openUpdateModal failed", e);
+				});
+			}catch(e){
+				console.error("[身临其境的AI] openUpdateModal failed", e);
+			}
+		},
+	},
 	slqj_ai_join_group_link:{
 		name:'<span style="text-decoration: underline;">加群</span>',
 		intro:'点击后访问加群链接：https://qm.qq.com/q/dsLvzGUvhC',
@@ -247,6 +289,7 @@ export default function(){
 		'<li>身份局提供独立身份猜测（不读取引擎真实身份），并随回合推进衰减线索。</li>',
 		'<li>可选：盲选手牌随机化（反全知）、评分噪声（仅冲动型）。</li>',
 		'<li>支持 <b>scripts</b> 脚本插件：加载扩展目录 <b>scripts/</b> 下一层脚本，并可在“scripts 插件管理”里启用/禁用与调整顺序。</li>',
+		'<li>支持 <b>检查更新/更新</b>：从 GitHub Releases 检查新版本；在支持写文件的环境可一键下载并覆盖更新（需重启生效）。</li>',
 		'</ul>',
 
 		'<div style="margin:10px"><b>生效范围（重要）</b></div>',
@@ -310,6 +353,6 @@ export default function(){
     author: "乐白/Q群:1082672096",
     diskURL: "",
     forumURL: "",
-    version: "0.0.1",
+    version: SLQJ_AI_EXTENSION_VERSION,
 },files:{"character":[],"card":[],"skill":[],"audio":[]}} 
 };
