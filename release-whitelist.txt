@@ -1,0 +1,9 @@
+# Release 打包白名单（相对仓库根目录）
+# - 支持文件或文件夹；文件夹会递归包含全部内容
+# - 以 # 开头的行会被忽略
+extension.js
+info.json
+README.md
+src/
+scripts/
+
