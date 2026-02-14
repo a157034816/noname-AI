@@ -284,16 +284,25 @@ export function createModalShell(opts) {
   // 兜底：项目全局 CSS 里对 div 有 position/transition 的默认样式
   // 移动端/缩放环境下 fixed/inset 可能出现“遮罩缩角”，因此这里使用 vw/vh 并配合 transform 补偿兜底。
   try {
-    backdrop.style.position = "fixed";
-    backdrop.style.left = "0";
-    backdrop.style.top = "0";
+    setStyleImportant(backdrop, "position", "fixed");
+    setStyleImportant(backdrop, "left", "0");
+    setStyleImportant(backdrop, "top", "0");
     // 使用 vw/vh：在某些“fixed 被祖先 transform 影响”的环境下，inset:0 可能只覆盖到包含块，导致遮罩缩角。
-    backdrop.style.right = "auto";
-    backdrop.style.bottom = "auto";
-    backdrop.style.width = "100vw";
-    backdrop.style.height = "100vh";
-    backdrop.style.margin = "0";
-    backdrop.style.zIndex = "9999";
+    setStyleImportant(backdrop, "right", "auto");
+    setStyleImportant(backdrop, "bottom", "auto");
+    // 注意：部分 WebView 下 vw/vh 可能小于实际可用区域（尤其是缩放/系统栏/可视视口差异），
+    // 因此这里优先使用 JS 测得的视口像素尺寸直写；无可用值时再退回到 vw/vh。
+    const vw = getViewportWidth();
+    const vh = getViewportHeight();
+    if (vw && vh) {
+      setStyleImportant(backdrop, "width", `${Math.floor(vw)}px`);
+      setStyleImportant(backdrop, "height", `${Math.floor(vh)}px`);
+    } else {
+      setStyleImportant(backdrop, "width", "100vw");
+      setStyleImportant(backdrop, "height", "100vh");
+    }
+    setStyleImportant(backdrop, "margin", "0");
+    setStyleImportant(backdrop, "z-index", "9999");
   } catch (e) {}
   const shadow = backdrop.attachShadow({ mode: "closed" });
 
@@ -385,10 +394,24 @@ export function createModalShell(opts) {
       mounted = backdrop.parentNode === html;
     }
   } catch (e) {}
+  // 兜底：优先挂到 html（避免落到 body 内被 documentZoom 缩放，导致遮罩/弹窗右下露底）
   if (!mounted) {
     try {
-      const mountNode = document.body || document.documentElement;
-      mountNode && mountNode.appendChild && mountNode.appendChild(backdrop);
+      const html = document.documentElement;
+      html && html.appendChild && html.appendChild(backdrop);
+      mounted = backdrop.parentNode === html;
+    } catch (e) {}
+  }
+  if (!mounted) {
+    try {
+      const body = document.body;
+      body && body.appendChild && body.appendChild(backdrop);
+      mounted = backdrop.parentNode === body;
+    } catch (e) {}
+  }
+  if (isModalLayoutDebugEnabled()) {
+    try {
+      console.debug("[slqj-ai][modal] mounted", { parent: backdrop && backdrop.parentNode ? backdrop.parentNode.nodeName : null });
     } catch (e) {}
   }
 
@@ -414,6 +437,7 @@ export function createModalShell(opts) {
   const state = { sx: 1, sy: 1 };
   const recomputeLayout = () => {
     try {
+      syncOverlayViewportSize(backdrop);
       const comp = compensateOverlayTransform(backdrop);
       state.sx = comp.sx;
       state.sy = comp.sy;
@@ -421,6 +445,22 @@ export function createModalShell(opts) {
       // 保持弹窗视觉尺寸稳定（对 overlay scale 的反向补偿）
       applyInverseScale(modal, state);
       applyModalSize(modal, state);
+      if (isModalLayoutDebugEnabled()) {
+        try {
+          console.debug("[slqj-ai][modal] recomputeLayout", {
+            coarse: isCoarsePointer(),
+            sx: state.sx,
+            sy: state.sy,
+            vw: getViewportWidth(),
+            vh: getViewportHeight(),
+            overlayTransform: backdrop && backdrop.style ? backdrop.style.transform : "",
+            offsetTransform: offsetWrap && offsetWrap.style ? offsetWrap.style.transform : "",
+            modalTransform: modal && modal.style ? modal.style.transform : "",
+            modalWidth: modal && modal.style ? modal.style.width : "",
+            modalHeight: modal && modal.style ? modal.style.height : "",
+          });
+        } catch (e) {}
+      }
     } catch (e) {}
   };
 
@@ -838,27 +878,38 @@ function applyModalSize(modal, state) {
   const vh = getViewportHeight();
   if (!vw || !vh) return;
 
+  const sx = state && isFiniteNumber(state.sx) && state.sx ? state.sx : 1;
+  const sy = state && isFiniteNumber(state.sy) && state.sy ? state.sy : 1;
+  const invX = sx ? 1 / sx : 1;
+  const invY = sy ? 1 / sy : 1;
+
   const minSide = Math.min(vw, vh);
   const coarse = isCoarsePointer();
   // 留出边距，避免贴边：手机端尽量留更小边距以获得更“高”的对话框
   const margin = minSide <= 520 ? 8 : clampNumber(Math.round(minSide * 0.06), 12, 24);
   const maxWVisible = Math.max(240, Math.floor(vw - margin * 2));
   const maxHVisible = Math.max(240, Math.floor(vh - margin * 2));
-  const minWVisible = Math.min(320, maxWVisible);
-  const minHVisible = Math.min(320, maxHVisible);
+
+  // 若 modal 被 inverse-scale 放大（inv > 1），需要反向收缩布局宽高，确保“视觉尺寸”仍在屏内。
+  // - inv <= 1：视觉更小，保持原布局即可
+  // - inv > 1：布局按 inv 分母缩小，避免部分落到屏外（常见于移动端 WebView/缩放环境）
+  const maxWLayout = Math.max(240, Math.floor(maxWVisible / (invX > 1 ? invX : 1)));
+  const maxHLayout = Math.max(240, Math.floor(maxHVisible / (invY > 1 ? invY : 1)));
+  const minWLayout = Math.min(320, maxWLayout);
+  const minHLayout = Math.min(320, maxHLayout);
 
   // 目标：
   // - 触屏/手机端：尽量接近满屏（高度优先）
   // - 桌面端：保持偏“对话框”风格（宽上限 920，高上限 820）
-  const wTarget = coarse ? maxWVisible : 920;
-  const hTarget = coarse ? maxHVisible : Math.min(820, maxHVisible);
-  const wVisible = clampNumber(wTarget, minWVisible, maxWVisible);
-  const hMaxVisible = hTarget;
-  const hVisible = clampNumber(hMaxVisible, minHVisible, hMaxVisible);
+  const wTarget = coarse ? maxWLayout : 920;
+  const hTarget = coarse ? maxHLayout : Math.min(820, maxHLayout);
+  const wLayout = clampNumber(wTarget, minWLayout, maxWLayout);
+  const hMaxLayout = hTarget;
+  const hLayout = clampNumber(hMaxLayout, minHLayout, hMaxLayout);
 
   try {
-    modal.style.width = `${wVisible}px`;
-    modal.style.height = `${hVisible}px`;
+    modal.style.width = `${wLayout}px`;
+    modal.style.height = `${hLayout}px`;
   } catch (e) {}
 }
 
@@ -873,7 +924,8 @@ function applyModalSize(modal, state) {
 function compensateOverlayTransform(overlay) {
   // 先清空 transform 以获取“未补偿前”的真实 rect，避免 resize 时叠加漂移
   try {
-    overlay.style.transform = "none";
+    // 这里用 important，避免被外部主题/全局样式用 !important 覆盖导致补偿失效。
+    setStyleImportant(overlay, "transform", "none");
   } catch (e) {}
 
   const rect = overlay.getBoundingClientRect();
@@ -887,8 +939,27 @@ function compensateOverlayTransform(overlay) {
   const lh = (overlay && isFiniteNumber(overlay.offsetHeight) && overlay.offsetHeight > 0) ? overlay.offsetHeight : vh;
   const sxRaw = rect.width ? lw / rect.width : 1;
   const syRaw = rect.height ? lh / rect.height : 1;
-  const sx = clampScale(isFiniteNumber(sxRaw) ? sxRaw : 1);
-  const sy = clampScale(isFiniteNumber(syRaw) ? syRaw : 1);
+  const sx0 = clampScale(isFiniteNumber(sxRaw) ? sxRaw : 1);
+  const sy0 = clampScale(isFiniteNumber(syRaw) ? syRaw : 1);
+
+  const coarse = isCoarsePointer();
+  // 触屏端兜底：不要把 overlay 缩小（scale < 1 会直接造成右/下露底）。
+  // 若确实需要“放大补偿”（scale > 1）来覆盖屏幕，则仍允许。
+  if (coarse && (sx0 < 0.99 || sy0 < 0.99)) {
+    try {
+      setStyleImportant(overlay, "transform", "none");
+    } catch (e) {}
+    if (isModalLayoutDebugEnabled()) {
+      try {
+        console.debug("[slqj-ai][modal] overlay: skip shrink compensation", { sx0, sy0, rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height }, vw, vh, lw, lh });
+      } catch (e) {}
+    }
+    return { sx: 1, sy: 1 };
+  }
+
+  const sx = coarse ? Math.max(1, sx0) : sx0;
+  const sy = coarse ? Math.max(1, sy0) : sy0;
+
   // 位移同样需要按补偿后的缩放系数折算：
   // 祖先缩放会把 translate 一并缩放（A * translate），因此这里使用 -rect.left * sx 来抵消。
   const tx = isFiniteNumber(rect.left) ? -rect.left * sx : 0;
@@ -897,10 +968,30 @@ function compensateOverlayTransform(overlay) {
     // CSS transform 列表按“从右到左”应用：这里用 translate(...) scale(...)
     // 先缩放到目标尺寸，再用 translate 直接抵消 rect.left/top（避免位移被缩放导致残余偏移）。
     const need = Math.abs(sx - 1) > 0.01 || Math.abs(sy - 1) > 0.01 || Math.abs(tx) > 0.5 || Math.abs(ty) > 0.5;
-    overlay.style.transform = need ? `translate(${tx}px, ${ty}px) scale(${sx}, ${sy})` : "none";
+    setStyleImportant(overlay, "transform", need ? `translate(${tx}px, ${ty}px) scale(${sx}, ${sy})` : "none");
     if (!need) return { sx: 1, sy: 1 };
   } catch (e) {}
   return { sx: isFiniteNumber(sx) ? sx : 1, sy: isFiniteNumber(sy) ? sy : 1 };
+}
+
+/**
+ * 同步 overlay 的布局尺寸到当前视口（以 px 直写）。
+ *
+ * 说明：
+ * - 主要用于兼容部分 WebView 下 vw/vh 与实际可用区域不一致，导致遮罩/弹窗整体偏移或留白。
+ * - 该函数只影响布局尺寸（offsetWidth/offsetHeight），不依赖视觉 rect。
+ *
+ * @param {HTMLElement} overlay
+ * @returns {void}
+ */
+function syncOverlayViewportSize(overlay) {
+  try {
+    const vw = getViewportWidth();
+    const vh = getViewportHeight();
+    if (!vw || !vh) return;
+    setStyleImportant(overlay, "width", `${Math.floor(vw)}px`);
+    setStyleImportant(overlay, "height", `${Math.floor(vh)}px`);
+  } catch (e) {}
 }
 
 /**
@@ -912,11 +1003,17 @@ function compensateOverlayTransform(overlay) {
  * @returns {void}
  */
 function applyCenterOffset(offsetWrap, state, ui) {
+  const debug = isModalLayoutDebugEnabled();
   // 触屏/手机端：直接以视口为基准居中（避免 ui.arena 的布局/缩放导致弹窗整体右下偏移）
   if (isCoarsePointer()) {
     try {
       offsetWrap.style.transform = "translate(0px, 0px)";
     } catch (e) {}
+    if (debug) {
+      try {
+        console.debug("[slqj-ai][modal] center: viewport (coarse)");
+      } catch (e) {}
+    }
     return;
   }
   const target = pickCenterTarget(ui);
@@ -924,6 +1021,11 @@ function applyCenterOffset(offsetWrap, state, ui) {
     try {
       offsetWrap.style.transform = "translate(0px, 0px)";
     } catch (e) {}
+    if (debug) {
+      try {
+        console.debug("[slqj-ai][modal] center: viewport (no target)");
+      } catch (e) {}
+    }
     return;
   }
   const rect = target.getBoundingClientRect();
@@ -932,14 +1034,58 @@ function applyCenterOffset(offsetWrap, state, ui) {
     try {
       offsetWrap.style.transform = "translate(0px, 0px)";
     } catch (e) {}
+    if (debug) {
+      try {
+        console.debug("[slqj-ai][modal] center: viewport (target not ready)", {
+          rect: rect ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height } : null,
+        });
+      } catch (e) {}
+    }
+    return;
+  }
+  const vw = getViewportWidth();
+  const vh = getViewportHeight();
+  if (!vw || !vh) {
+    try {
+      offsetWrap.style.transform = "translate(0px, 0px)";
+    } catch (e) {}
+    if (debug) {
+      try {
+        console.debug("[slqj-ai][modal] center: viewport (invalid viewport)", { vw, vh });
+      } catch (e) {}
+    }
     return;
   }
   const cx = rect.left + rect.width / 2;
   const cy = rect.top + rect.height / 2;
-  const vx = getViewportWidth() / 2;
-  const vy = getViewportHeight() / 2;
+  const vx = vw / 2;
+  const vy = vh / 2;
   const dx = cx - vx;
   const dy = cy - vy;
+
+  // 兜底：若目标中心偏离视口中心过多，很可能是 rect 异常（缩放/布局未稳定等），避免把弹窗推到屏幕外。
+  const maxDx = vw * 0.45;
+  const maxDy = vh * 0.45;
+  if (!isFiniteNumber(dx) || !isFiniteNumber(dy) || Math.abs(dx) > maxDx || Math.abs(dy) > maxDy) {
+    try {
+      offsetWrap.style.transform = "translate(0px, 0px)";
+    } catch (e) {}
+    if (debug) {
+      try {
+        console.debug("[slqj-ai][modal] center: clamped to viewport", {
+          vw,
+          vh,
+          dx,
+          dy,
+          maxDx,
+          maxDy,
+          rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+        });
+      } catch (e) {}
+    }
+    return;
+  }
+
   const sx = state?.sx || 1;
   const sy = state?.sy || 1;
   const adjX = isFiniteNumber(dx) && isFiniteNumber(sx) && sx ? dx / sx : 0;
@@ -947,6 +1093,22 @@ function applyCenterOffset(offsetWrap, state, ui) {
   try {
     offsetWrap.style.transform = `translate(${adjX}px, ${adjY}px)`;
   } catch (e) {}
+
+  if (debug) {
+    try {
+      console.debug("[slqj-ai][modal] center: ui target", {
+        vw,
+        vh,
+        dx,
+        dy,
+        sx,
+        sy,
+        adjX,
+        adjY,
+        rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+      });
+    } catch (e) {}
+  }
 }
 
 /**
@@ -1015,12 +1177,65 @@ function getViewportHeight() {
 function isCoarsePointer() {
   try {
     if (typeof window === "undefined") return false;
-    if (typeof window.matchMedia !== "function") {
-      const nav = typeof navigator !== "undefined" ? navigator : null;
-      const maxTouchPoints = nav && typeof nav.maxTouchPoints === "number" ? nav.maxTouchPoints : 0;
-      return ("ontouchstart" in window) || maxTouchPoints > 0;
-    }
-    return window.matchMedia("(pointer: coarse)").matches || window.matchMedia("(hover: none)").matches;
+
+    const nav = typeof navigator !== "undefined" ? navigator : null;
+    const ua = nav && typeof nav.userAgent === "string" ? nav.userAgent : "";
+    const isMobileUA = !!ua && /(Android|iPhone|iPad|iPod)/i.test(ua);
+    const maxTouchPoints = nav && typeof nav.maxTouchPoints === "number" ? nav.maxTouchPoints : 0;
+    const msMaxTouchPoints = nav && typeof nav.msMaxTouchPoints === "number" ? nav.msMaxTouchPoints : 0;
+    const hasTouch = ("ontouchstart" in window) || maxTouchPoints > 0 || msMaxTouchPoints > 0;
+
+    let mediaCoarse = false;
+    let mediaHoverNone = false;
+    try {
+      if (typeof window.matchMedia === "function") {
+        mediaCoarse = !!window.matchMedia("(pointer: coarse)").matches;
+        mediaHoverNone = !!window.matchMedia("(hover: none)").matches;
+      }
+    } catch (e) {}
+
+    if (mediaCoarse || mediaHoverNone) return true;
+    if (hasTouch) return true;
+    if (isMobileUA) return true;
+
+    // 视口足够小：通常也是移动端/触屏场景（兜底避免误判导致弹窗整体偏移）。
+    try {
+      const vw = getViewportWidth();
+      const vh = getViewportHeight();
+      if (vw && vh && Math.min(vw, vh) <= 520) return true;
+    } catch (e) {}
+
+    return false;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * 以 inline style + !important 的方式设置样式，避免被外部主题/全局样式覆盖。
+ *
+ * @param {HTMLElement} el
+ * @param {string} prop
+ * @param {string} value
+ * @returns {void}
+ */
+function setStyleImportant(el, prop, value) {
+  try {
+    el && el.style && typeof el.style.setProperty === "function" && el.style.setProperty(String(prop || ""), String(value || ""), "important");
+  } catch (e) {}
+}
+
+/**
+ * 是否启用模态弹窗布局调试输出。
+ *
+ * 约定：在控制台设置 `window.__slqjAiDebugModalLayout = true` 后生效。
+ *
+ * @returns {boolean}
+ */
+function isModalLayoutDebugEnabled() {
+  try {
+    // @ts-ignore
+    return typeof window !== "undefined" && window.__slqjAiDebugModalLayout === true;
   } catch (e) {
     return false;
   }

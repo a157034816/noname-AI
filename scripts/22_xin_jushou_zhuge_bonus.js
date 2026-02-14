@@ -9,12 +9,14 @@
  */
 export const slqjAiScriptMeta = {
 	name: "界沮授武将红利（摸牌偏置诸葛连弩）",
-	version: "1.0.0",
-	description: "仅当玩家使用界沮授（xin_jushou）时生效：从牌堆摸牌时以较高概率把诸葛连弩（zhuge）移到牌堆顶，从而“更容易摸到诸葛连弩”。",
+	version: "1.0.1",
+	description:
+		"仅当玩家使用界沮授（xin_jushou）时生效：从牌堆摸牌时以较高概率把诸葛连弩（zhuge）移到牌堆顶，从而“更容易摸到诸葛连弩”；若已持有诸葛连弩，则再次偏置的概率会大幅降低。",
 };
 
 const SKILL_NAME = "slqj_bonus_xin_jushou_zhuge_draw";
 const DEFAULT_CHANCE = 0.75;
+const DEFAULT_HAS_CARD_CHANCE_FACTOR = 0.02;
 
 /**
  * scripts 插件入口：安装界沮授（xin_jushou）摸牌红利（偏置诸葛连弩）。
@@ -92,7 +94,7 @@ export default function setup(ctx) {
  * 获取（或创建）运行时对象，并挂载到 `game.__slqjAiPersona.xinJushouZhugeBonus`。
  *
  * @param {*} game
- * @returns {{installed?:boolean, cfg?:{chance:number, generalKey:string, cardKey:string, debug:boolean}, api?:{onDrawBegin:Function}}|null}
+ * @returns {{installed?:boolean, cfg?:{chance:number, generalKey:string, cardKey:string, hasCardChanceFactor:number, debug:boolean}, api?:{onDrawBegin:Function}}|null}
  */
 function getOrCreateRuntime(game) {
 	if (!game) return null;
@@ -105,11 +107,18 @@ function getOrCreateRuntime(game) {
 	const runtime = root.xinJushouZhugeBonus;
 
 	if (!runtime.cfg || typeof runtime.cfg !== "object") {
-		runtime.cfg = { chance: DEFAULT_CHANCE, generalKey: "xin_jushou", cardKey: "zhuge", debug: false };
+		runtime.cfg = {
+			chance: DEFAULT_CHANCE,
+			generalKey: "xin_jushou",
+			cardKey: "zhuge",
+			hasCardChanceFactor: DEFAULT_HAS_CARD_CHANCE_FACTOR,
+			debug: false,
+		};
 	} else {
 		if (typeof runtime.cfg.chance !== "number") runtime.cfg.chance = DEFAULT_CHANCE;
 		if (typeof runtime.cfg.generalKey !== "string") runtime.cfg.generalKey = "xin_jushou";
 		if (typeof runtime.cfg.cardKey !== "string") runtime.cfg.cardKey = "zhuge";
+		if (typeof runtime.cfg.hasCardChanceFactor !== "number") runtime.cfg.hasCardChanceFactor = DEFAULT_HAS_CARD_CHANCE_FACTOR;
 		if (typeof runtime.cfg.debug !== "boolean") runtime.cfg.debug = false;
 	}
 
@@ -137,12 +146,13 @@ function getOrCreateRuntime(game) {
 			const cfg = rt?.cfg || {};
 			if (cfg.generalKey !== "xin_jushou") return;
 
-			const chance = typeof cfg.chance === "number" ? cfg.chance : DEFAULT_CHANCE;
-			if (!(chance > 0)) return;
-			if (Math.random() >= chance) return;
-
 			const cardKey = typeof cfg.cardKey === "string" ? cfg.cardKey : "zhuge";
 			if (!cardKey) return;
+
+			const baseChance = typeof cfg.chance === "number" ? cfg.chance : DEFAULT_CHANCE;
+			const chance = computeEffectiveChance(baseChance, cfg, player, cardKey);
+			if (!(chance > 0)) return;
+			if (Math.random() >= chance) return;
 
 			const ok = tryMoveNamedCardToPileTop(cardKey, ui);
 			if (!ok) return;
@@ -150,13 +160,58 @@ function getOrCreateRuntime(game) {
 			try {
 				if (cfg.debug) {
 					const trans = typeof get.translation === "function" ? get.translation(cardKey) : cardKey;
-					console.debug("[身临其境的AI][bonus]", "move to top:", player?.name, trans);
+					const owned = playerHasNamedCard(player, cardKey);
+					console.debug("[身临其境的AI][bonus]", "move to top:", player?.name, trans, owned ? "(owned)" : "");
 				}
 			} catch (e) {}
 		};
 	}
 
 	return runtime;
+}
+
+/**
+ * 计算本次摸牌偏置的实际触发概率。
+ *
+ * - 未持有目标牌：`chance`
+ * - 已持有目标牌：`chance * hasCardChanceFactor`（默认 0.02，即显著降低重复摸到的概率）
+ *
+ * @param {number} chance
+ * @param {{hasCardChanceFactor?:number}} cfg
+ * @param {*} player
+ * @param {string} cardKey
+ * @returns {number}
+ */
+function computeEffectiveChance(chance, cfg, player, cardKey) {
+	let effectiveChance = chance;
+	if (playerHasNamedCard(player, cardKey)) {
+		const factor =
+			typeof cfg?.hasCardChanceFactor === "number" ? cfg.hasCardChanceFactor : DEFAULT_HAS_CARD_CHANCE_FACTOR;
+		const normalizedFactor = Math.max(0, Math.min(1, factor));
+		effectiveChance = effectiveChance * normalizedFactor;
+	}
+	if (!(effectiveChance > 0)) return 0;
+	return Math.min(1, effectiveChance);
+}
+
+/**
+ * 判断玩家是否已持有指定牌名（手牌 + 装备区）。
+ *
+ * @param {*} player
+ * @param {string} name
+ * @returns {boolean}
+ */
+function playerHasNamedCard(player, name) {
+	if (!player || !name) return false;
+	try {
+		if (typeof player.countCards === "function") {
+			return player.countCards("he", name) > 0;
+		}
+		if (typeof player.getEquip === "function") {
+			return !!player.getEquip(name);
+		}
+	} catch (e) {}
+	return false;
 }
 
 /**

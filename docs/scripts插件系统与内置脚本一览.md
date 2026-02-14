@@ -156,6 +156,11 @@
 - UI 只读取该对象，不会自动调用脚本入口函数
 - 若脚本未提供 meta，则 UI 回退显示文件名
 
+### 4.2 布局与调试
+
+- 触屏/手机端：弹窗以视口中心为基准居中（不使用 `ui.arena/ui.window` 的偏移），避免部分 WebView 下整体偏到左上/右下。
+- 调试：在控制台执行 `window.__slqjAiDebugModalLayout = true` 后重新打开弹窗，可输出布局计算日志；用完设回 `false`。
+
 ---
 
 ## 5) 写一个 scripts 插件（开发者指南）
@@ -328,7 +333,7 @@ HookBus 支持 `priority`（越大越先执行）：
 元信息：
 
 - name：界沮授武将红利（摸牌偏置诸葛连弩）
-- version：1.0.0
+- version：1.0.1
 - 作用：当玩家使用界沮授（`xin_jushou`）时，在摸牌前以一定概率把牌堆中的【诸葛连弩】移动到牌堆顶，从而更容易摸到
 
 接入点：
@@ -339,6 +344,7 @@ HookBus 支持 `priority`（越大越先执行）：
 
 - 不凭空生成牌：仅当牌堆（`ui.cardPile`）中存在 `zhuge` 时，才将其 DOM 节点移动到牌堆顶
 - 默认触发概率：`0.75`
+- 重复保护：若玩家已持有 `zhuge`（手牌/装备区任一处），则触发概率会乘以 `hasCardChanceFactor`（默认 `0.02`，即大幅降低再次摸到第二把的概率）
 
 重要副作用提示（玩家需要知道）：
 
@@ -412,6 +418,58 @@ HookBus 支持 `priority`（越大越先执行）：
 - 会显著改变观战体验/屏幕表情数量（尤其阶段 2 高频连丢）
 - 由于它不改变出牌/策略，属于纯“表现层互动”，适合想增强沉浸感但不想改强度的用户
   - 若触发“肢解鸡蛋大战”，可能出现更长时间的互砸/刷屏（可在脚本内关闭或调低概率）
+
+---
+
+### 6.8 技能自定义tag补全（框架）【已迁移至扩展核心】
+
+说明：
+
+- 该功能已从 scripts 插件迁移至扩展核心（不再由 `slqj_ai_scripts_enable` 控制）
+- 入口会注册多个处理器（processor），处理器基于技能文本说明（正则匹配）推导 tag，并汇总写入 `lib.skill[skillId].ai`，以便后续通过 `hasSkillTag` 精准识别技能特征
+- 执行时机固定为：首轮开始前（`gameStart`）对本局出现的技能补全；并在技能增减（`addSkillCheck`）时对新增技能增量补全（不再提供配置项）
+
+实现要点（当前核心位置）：
+
+- 核心入口：`src/ai_persona/skill_custom_tags/index.js`
+- 子模块目录：`src/ai_persona/skill_custom_tags/`
+- 处理器框架：`src/ai_persona/skill_custom_tags/framework.js`
+- 正则片段：`src/ai_persona/skill_custom_tags/patterns.js`
+- tag 常量：`src/ai_persona/skill_custom_tags/tags.js`
+- 处理器注册表：`src/ai_persona/skill_custom_tags/processors/index.js`
+- 处理器目录（更深一层）：`src/ai_persona/skill_custom_tags/processors/*/*.js`
+- 内置处理器（当前）：
+  - `active_maixie`：主动卖血（出牌阶段失去体力/受伤）
+  - `passive_maixie`：被动卖血（受伤/失去体力后触发收益）
+  - `respond_shan`：回合外防御（可响应【闪】/视为打出【闪】）
+  - `respond_sha`：回合外响应（可响应【杀】/视为打出【杀】）
+  - `respond_wuxie`：无懈（可使用/视为使用【无懈可击】）
+  - `draw_self`：自己摸牌/补牌
+  - `draw_other`：令他人摸牌/补牌
+  - `discard_self`：自己弃牌
+  - `discard_other`：令他人弃牌
+  - `gain_other_cards`：获得他人牌（夺牌/获得其区域牌）
+  - `give_cards`：交给/赠予他人牌
+  - `recover_self`：回复自己体力
+  - `recover_other`：令他人回复体力
+  - `distance`：距离/攻击范围修正、无距离限制
+  - `sha_extra`：额外出杀/无限出杀（次数相关）
+  - `force_response`：强制响应（强制他人打出【闪/杀】否则受罚）
+  - `forbid_cards`：禁牌（不能/不得使用或打出牌/【杀】/【闪】/【无懈可击】等）
+  - `damage_other`：对他人造成伤害
+  - `control_turnover`：翻面控制
+  - `control_link`：横置/连环控制
+  - `rejudge`：改判
+  - `save`：濒死救援（保守识别）
+- 写入位置：`lib.skill[skillId].ai[tag]=true`（因此可通过 `player.hasSkillTag(tag)` 读取）
+- 运行期状态：
+  - `game.__slqjAiPersona.skillCustomTags`：已推导出的 skillId->tags（增量累积）
+  - `game.__slqjAiPersona.skillCustomTagsScanReport`：最后一次扫描/命中统计
+  - `game.__slqjAiPersona.skillCustomTagsReport`：最后一次写入 `skill.ai` 的结果（missing/跳过等）
+
+示例（当前内置）：
+
+- 黄盖 `kurou`（苦肉）：`slqj_ai_maixie` + `slqj_ai_active_maixie` + `slqj_ai_draw_self`
 
 ---
 

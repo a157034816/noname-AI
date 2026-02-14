@@ -1,6 +1,7 @@
 import { lib, game, ui, get, ai, _status } from "../../noname.js";
 import { installPersonaSystem } from "./src/ai_persona/index.js";
 import { installEmotionThrowEvent } from "./src/ai_persona/emotion_throw_event.js";
+import { installSkillCustomTags } from "./src/ai_persona/skill_custom_tags/index.js";
 import { loadExtensionScripts } from "./src/scripts_loader.js";
 import { openScriptsPluginManagerModal } from "./src/scripts_manager_modal.js";
 import { maybeAutoCheckForUpdates } from "./src/update/auto_check.js";
@@ -56,6 +57,13 @@ export default function(){
 				installPersonaSystem({ lib, game, get, ai, _status, config });
 			}catch(e){
 				console.error("[身临其境的AI] installPersonaSystem failed", e);
+			}
+
+			/** 核心：技能自定义 tag 补全（基于技能说明正则匹配推导并写入 skill.ai）。 */
+			try{
+				installSkillCustomTags({ lib, game, ui, get, ai, _status, config });
+			}catch(e){
+				console.error("[身临其境的AI] installSkillCustomTags failed", e);
 			}
 
 		/** 互动事件：监听 `player.throwEmotion(...)` 并通过 game.slqjAiHooks 分发。 */
