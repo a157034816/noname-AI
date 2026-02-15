@@ -12,6 +12,10 @@ export function createDrawSelfProcessor() {
 	const reMutualDraw = new RegExp(String.raw`你(?:与|和)[^。]{0,20}各摸${NUM}张牌`);
 	// 处理“你可以……然后摸X张牌”（不显式写“你摸”）这类常见描述；排除“令XXX摸牌”的场景。
 	const reYouCanDraw = new RegExp(String.raw`你(?:可以|可)(?![^。]*令)[^。]*摸${NUM}张牌`);
+	// 兼容“……然后/并/再/接着 摸X张牌”（省略主语）。
+	const reThenDraw = new RegExp(String.raw`(?:然后|并|再|接着)\s*摸${NUM}张牌`);
+	// 兼容“回复1点体力或摸一张牌”这类二选一写法。
+	const reOrDraw = new RegExp(String.raw`(?:或|或者)\s*摸${NUM}张牌`);
 	// 常见选项写法：“……可以选择一项：1.回复1点体力；2.摸一张牌。”（省略主语）
 	const reBare = new RegExp(String.raw`(?:^|[。；：]|[①②③④⑤⑥⑦⑧⑨⑩]|[⒈⒉⒊⒋⒌⒍⒎⒏⒐⒑]|\d+[\.:：])\s*摸${NUM}张牌`);
 	// 兼容“……，摸一张牌/（…改为摸一张牌）”等省略主语的写法（常见于使命技/条件分支）。
@@ -53,7 +57,11 @@ export function createDrawSelfProcessor() {
 	// 摸等量：弃置任意张牌并摸等量的牌
 	const reDrawEqual = /摸等量(?:张)?的?牌/;
 	// 体力值张牌：摸其体力值张牌/摸体力值张牌
-	const reDrawHpCount = /摸(?:其)?体力值张牌/;
+	const reDrawHpCount = /摸(?:其)?体力值(?:数)?张牌/;
+	// 已损失体力值张牌：摸你已损失体力值张牌（常见于“卖血换牌/弃牌后摸”口径）。
+	const reDrawLostHpCount = /摸(?:你)?已损失(?:的)?体力值(?:数)?张牌/;
+	// 额外摸牌阶段：执行/进行一个额外的摸牌阶段。
+	const reExtraDrawPhase = /(?:执行|进行)(?:一个)?额外的?摸牌阶段/;
 	// 特例：dcweiji 等口径——“你摸你选择数字张牌”。
 	const reDrawPickNumber = /你摸你选择[^。]{0,10}张牌/;
 	// 翻倍：下次摸牌翻倍/令自己本回合下次摸牌翻倍
@@ -71,6 +79,8 @@ export function createDrawSelfProcessor() {
 					reYouDraw.test(text) ||
 					reMutualDraw.test(text) ||
 					reYouCanDraw.test(text) ||
+					reThenDraw.test(text) ||
+					reOrDraw.test(text) ||
 					reBare.test(text) ||
 					reBareAfterComma.test(text) ||
 					reRewriteToDraw.test(text) ||
@@ -84,6 +94,8 @@ export function createDrawSelfProcessor() {
 					reExtraDraw.test(text) ||
 					reDrawEqual.test(text) ||
 					reDrawHpCount.test(text) ||
+					reDrawLostHpCount.test(text) ||
+					reExtraDrawPhase.test(text) ||
 					reDrawPickNumber.test(text) ||
 					reDrawDouble.test(text)
 				)

@@ -21,14 +21,22 @@ export function createDiscardSelfProcessor() {
 		String.raw`(?:^|[。；：]|[①②③④⑤⑥⑦⑧⑨⑩]|[⒈⒉⒊⒋⒌⒍⒎⒏⒐⒑]|\d+[\.:：])\s*弃置(?:至少|至多)?(?:${NUM}|任意)张${CARD_TAIL}`,
 		"g"
 	);
-	const reOtherChooseOptionPrefix = /令[^。]{0,20}选择一项[：:]\s*$/;
+	const reOtherOptionPrefix = /令[^。]{0,20}(?:选择|执行)一项[：:]\s*$/;
 	// 兼容：“……然后弃置X张牌/并弃置X张牌”。
 	const reThen = new RegExp(String.raw`(?:然后|并|再|接着)\s*弃置(?:至少|至多)?(?:${NUM}|任意)张${CARD_TAIL}`);
 	const reAll = /你弃置(?:所有|全部)(?:手牌|牌)/;
 	const reAllByFilter = new RegExp(String.raw`你(?:可|可以)?弃置([^。]{0,20})的所有(?:手牌|牌)`, "g");
 	const reDiscardGainedHandcards = /你弃置[^。]{0,30}获得的手牌/;
+	// 兼容：“你弃置…展示的手牌”（常见于“展示→弃置展示牌”口径）。
+	const reDiscardDisplayedHandcards = /你弃置[^。]{0,40}展示的手牌/;
+	// 兼容：“你弃置手牌中任意张……的牌/你弃置手牌中X张……的牌”。
+	const reDiscardHandcardsIn = new RegExp(String.raw`你弃置[^。]{0,20}手牌中(?:至少|至多)?(?:${NUM}|任意)张[^。]{0,30}牌`);
+	// 兼容：“弃置你一张手牌”（由他人执行弃置动作，但弃置对象是你的牌，按“涉及自己弃牌”处理）。
+	const reDiscardYouCards = new RegExp(String.raw`弃置你[^。]{0,30}(?:至少|至多)?(?:${NUM}|任意)张${CARD_TAIL}`);
 	const reEach = new RegExp(String.raw`你弃置[^。]{0,30}各${NUM}张${CARD_TAIL}`);
 	const reIncludeYouEach = new RegExp(String.raw`弃置你、[^。]{0,50}各${NUM}张${CARD_TAIL}`);
+	// 兼容：“你可以/可……弃置……各X张牌”（如“弃置你与伤害来源各一张牌”）。
+	const reYouCanEach = new RegExp(String.raw`你(?:可以|可)(?![^。]*令)[^。]{0,40}弃置[^。]{0,40}各${NUM}张${CARD_TAIL}`);
 	// “将…置入弃牌堆”类表述（通常等价于弃置，但不触发“弃置”关键词）。
 	const rePutToDiscardPile = new RegExp(String.raw`你(?:可以|可)(?![^。]*令)[^。]{0,40}置入弃牌堆`);
 	// “弃置至X张/弃置至X”类表述（常见于“调整手牌至某个数量”）。
@@ -126,7 +134,7 @@ export function createDiscardSelfProcessor() {
 			const idx = typeof m.index === "number" ? m.index : -1;
 			if (idx >= 0) {
 				const prefix = text.slice(Math.max(0, idx - 60), idx);
-				if (reOtherChooseOptionPrefix.test(prefix)) continue;
+				if (reOtherOptionPrefix.test(prefix)) continue;
 			}
 			return true;
 		}
@@ -149,8 +157,12 @@ export function createDiscardSelfProcessor() {
 					reAll.test(text) ||
 					matchesDiscardAllByFilterSelf(text) ||
 					reDiscardGainedHandcards.test(text) ||
+					reDiscardDisplayedHandcards.test(text) ||
+					reDiscardHandcardsIn.test(text) ||
+					reDiscardYouCards.test(text) ||
 					reEach.test(text) ||
 					reIncludeYouEach.test(text) ||
+					reYouCanEach.test(text) ||
 					rePutToDiscardPile.test(text) ||
 					reDiscardToHandCountSelf.test(text) ||
 					rePutRestHandcardsToDiscardPile.test(text) ||
