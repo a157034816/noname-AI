@@ -61,7 +61,15 @@ export {};
 
 /**
  * 统计信息（用于 UI 展示/策略）。
- * @typedef {{draw:number, damageDealt:number}} SlqjAiStats
+ * @typedef {{
+ *  draw:number,
+ *  damageDealt:number,
+ *  outputCore?: boolean, // 输出核心（本局内）：在任意连续两回合达标后锁定为 true
+ *  turnDraw?: number, // 当前回合（自身回合）内累计过牌
+ *  turnDamageDealt?: number, // 当前回合（自身回合）内累计造成伤害
+ *  prevTurnDraw?: number, // 上一回合（自身回合）内累计过牌
+ *  prevTurnDamageDealt?: number, // 上一回合（自身回合）内累计造成伤害
+ * }} SlqjAiStats
  */
 
 /**
@@ -126,6 +134,8 @@ export {};
  *  slqj_ai_inspect_enable?: boolean,
  *  slqj_ai_blind_handcard_random?: boolean,
  *  slqj_ai_score_noise_enable?: boolean,
+ *  slqj_ai_output_core_draw_threshold?: (number|string),
+ *  slqj_ai_output_core_damage_threshold?: (number|string),
  *  slqj_ai_persona_enable_balanced?: boolean,
  *  slqj_ai_persona_enable_impulsive?: boolean,
  *  slqj_ai_persona_enable_petty?: boolean,

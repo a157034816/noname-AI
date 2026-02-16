@@ -17,7 +17,7 @@ export function createDrawOtherProcessor() {
 	const reMutual = new RegExp(String.raw`你(?:与|和)[^。]{0,20}各摸${NUM}张牌`);
 	// 互摸写法里省略“你”的情况：常见于“你可选择一项：1.与当前回合角色各摸一张牌；…”。
 	const reMutualBare = new RegExp(
-		String.raw`(?:^|[。；：]|[①②③④⑤⑥⑦⑧⑨⑩]|[⒈⒉⒊⒋⒌⒍⒎⒏⒐⒑]|\d+[\.:：])\s*(?:与|和)[^。]{0,20}各摸${NUM}张牌`
+		String.raw`(?:^|[。；：]|[，,]|[①②③④⑤⑥⑦⑧⑨⑩]|[⒈⒉⒊⒋⒌⒍⒎⒏⒐⒑]|\d+[\.:：])\s*(?:然后|并|再|接着)?\s*(?:与|和)[^。]{0,20}各摸${NUM}张牌`
 	);
 	// “交换后手牌较少/最少的角色摸X张牌” 等特例（常见于缔盟类描述）。
 	const reLessHandDraw = new RegExp(String.raw`(?:交换后)?手牌(?:数)?(?:最少|较少|更少)的角色摸${NUM}张牌`);

@@ -82,9 +82,20 @@ export default function(){
 		console.error("[身临其境的AI] loadExtensionScripts failed", e);
 	}
 
-		/** 自动检查更新（节流；发现新版本仅提示控制台，需手动在设置里打开“检查更新/更新”）。 */
+		/** 启动时自动检查更新（每次启动最多一次）；发现新版本自动弹窗提示，不强制更新。 */
 		try{
-			maybeAutoCheckForUpdates({ baseUrl: import.meta.url, lib, game, config, currentVersion: SLQJ_AI_EXTENSION_VERSION, connectMode: _status && _status.connectMode }).catch(function(e){
+			maybeAutoCheckForUpdates({ baseUrl: import.meta.url, lib, game, config, currentVersion: SLQJ_AI_EXTENSION_VERSION, connectMode: _status && _status.connectMode }).then(function(result){
+				try{
+					if(!result||!result.ok||!result.updateAvailable) return;
+					if(game&&game.__slqjAiUpdateModalOpened) return;
+					if(game) game.__slqjAiUpdateModalOpened=true;
+					openUpdateModal({ baseUrl: import.meta.url, lib, game, ui, config: lib.config, currentVersion: SLQJ_AI_EXTENSION_VERSION, initialCheck: result }).catch(function(e){
+						console.error("[身临其境的AI] openUpdateModal failed", e);
+					});
+				}catch(e){
+					console.error("[身临其境的AI] maybeAutoCheckForUpdates handler failed", e);
+				}
+			}).catch(function(e){
 				console.error("[身临其境的AI] maybeAutoCheckForUpdates failed", e);
 			});
 		}catch(e){
@@ -116,6 +127,54 @@ export default function(){
 		onclick:function(bool){
 			game.saveConfig('extension_身临其境的AI_slqj_ai_inspect_enable',bool);
 			game.saveConfig('slqj_ai_inspect_enable',bool);
+		},
+	},
+	slqj_ai_output_core_draw_threshold:{
+		name:'输出核心阈值：过牌',
+		intro:'当玩家在任意连续两回合（自身回合）内累计过牌达到该值时，本局内视为输出核心（任意一项达标即为核心；默认：8；设置为0表示“只要两回合过牌为正数就算达标”）；修改后建议重启生效',
+		init: lib.config.slqj_ai_output_core_draw_threshold===undefined?'8':String(lib.config.slqj_ai_output_core_draw_threshold),
+		input:true,
+		/**
+		 * @param {Event} e
+		 * @returns {void}
+		 */
+		onblur:function(e){
+			/**
+			 * @type {HTMLDivElement}
+			 */
+			// @ts-ignore
+			var target=e.target;
+			var v=Number(target.innerText);
+			if(isNaN(v)||v<0){
+				target.innerText='8';
+				v=8;
+			}
+			game.saveConfig('extension_身临其境的AI_slqj_ai_output_core_draw_threshold',v);
+			game.saveConfig('slqj_ai_output_core_draw_threshold',v);
+		},
+	},
+	slqj_ai_output_core_damage_threshold:{
+		name:'输出核心阈值：伤害',
+		intro:'当玩家在任意连续两回合（自身回合）内累计造成伤害达到该值时，本局内视为输出核心（任意一项达标即为核心；默认：3；设置为0表示“只要两回合伤害为正数就算达标”）；修改后建议重启生效',
+		init: lib.config.slqj_ai_output_core_damage_threshold===undefined?'3':String(lib.config.slqj_ai_output_core_damage_threshold),
+		input:true,
+		/**
+		 * @param {Event} e
+		 * @returns {void}
+		 */
+		onblur:function(e){
+			/**
+			 * @type {HTMLDivElement}
+			 */
+			// @ts-ignore
+			var target=e.target;
+			var v=Number(target.innerText);
+			if(isNaN(v)||v<0){
+				target.innerText='3';
+				v=3;
+			}
+			game.saveConfig('extension_身临其境的AI_slqj_ai_output_core_damage_threshold',v);
+			game.saveConfig('slqj_ai_output_core_damage_threshold',v);
 		},
 	},
 	slqj_ai_blind_handcard_random:{

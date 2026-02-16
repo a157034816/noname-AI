@@ -1,7 +1,7 @@
 import { STORAGE_KEY } from "../lib/constants.js";
 import { getPid } from "../lib/utils.js";
 import { explainGuessIdentityConsensus, explainGuessIdentityFor } from "../guess_identity.js";
-import { getStats, getOutputCoreScore, getCampOutputCorePlayer, getPlayerCamp } from "../stats.js";
+import { getCampOutputCorePlayer, getPlayerCamp, getStats, getOutputCoreScore, isOutputCore } from "../stats.js";
 
 const VB = {
   noData: { zh: "未启用/无人格数据", en: "Not enabled / no persona data" },
@@ -456,11 +456,8 @@ export function buildInspectText(target, game, get, lang = "zh") {
   }
   const myStats = getStats(target);
   const myCoreScore = getOutputCoreScore(myStats);
-  const zhuCore = getCampOutputCorePlayer(game, "zhu");
-  const fanCore = getCampOutputCorePlayer(game, "fan");
-  const myCamp = getPlayerCamp(target && target.identity);
-  const myCore = myCamp === "zhu" ? zhuCore : myCamp === "fan" ? fanCore : null;
-  const isCore = !!(myCore && target && myCore === target && myCamp !== "other");
+  const cfg = game?.__slqjAiPersona?.cfg || null;
+  const isCore = isOutputCore(myStats, cfg);
 
   let out = "";
   out += vbLine(lang, "personaType", formatPersonaId(persona ? persona.id : null, lang));
@@ -530,6 +527,9 @@ export function buildInspectText(target, game, get, lang = "zh") {
 
   out += "<br>";
   out += `${vbText(lang, "sectionAttitude")}:<br>`;
+
+  const zhuCore = getCampOutputCorePlayer(game, "zhu");
+  const fanCore = getCampOutputCorePlayer(game, "fan");
 
   for (const p of others) {
     const name = formatColoredPlayerName(p, get);

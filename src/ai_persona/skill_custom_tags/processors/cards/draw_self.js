@@ -10,8 +10,13 @@ import { NUM } from "../../patterns.js";
 export function createDrawSelfProcessor() {
 	const reYouDraw = new RegExp(String.raw`你摸${NUM}张牌`);
 	const reMutualDraw = new RegExp(String.raw`你(?:与|和)[^。]{0,20}各摸${NUM}张牌`);
-	// 处理“你可以……然后摸X张牌”（不显式写“你摸”）这类常见描述；排除“令XXX摸牌”的场景。
-	const reYouCanDraw = new RegExp(String.raw`你(?:可以|可)(?![^。]*令)[^。]*摸${NUM}张牌`);
+	// “所有角色/全体角色各摸X张牌”中包含你自己，也应视为“自己摸牌”收益。
+	const reAllEachDraw = new RegExp(String.raw`(?:所有角色|全体角色)各摸${NUM}张牌`);
+	const reAllDraw = new RegExp(String.raw`(?:所有角色|全体角色)摸${NUM}张牌`);
+	// 处理“你可以……摸X张牌”；注意：只排除“摸”前出现“令”的场景（避免把“你可以令X摸牌”误识别为“你自摸”）。
+	const reYouCanDraw = new RegExp(String.raw`你(?:可以|可)([^。]{0,80}?)摸${NUM}张牌`, "g");
+	// 兼容“当你……时，可以/可……摸X张牌”（省略主语“你”）。
+	const reWhenYouCanDraw = new RegExp(String.raw`当你[^。]{0,80}?(?:时|后|前|开始时|结束时)[^。]{0,10}(?:可以|可)([^。]{0,80}?)摸${NUM}张牌`, "g");
 	// 兼容“……然后/并/再/接着 摸X张牌”（省略主语）。
 	const reThenDraw = new RegExp(String.raw`(?:然后|并|再|接着)\s*摸${NUM}张牌`);
 	// 兼容“回复1点体力或摸一张牌”这类二选一写法。
@@ -25,6 +30,8 @@ export function createDrawSelfProcessor() {
 	const reOptionMutualDraw = new RegExp(
 		String.raw`你[^。]{0,40}选择一项[^。]{0,20}[：:]\s*(?:[①②③④⑤⑥⑦⑧⑨⑩]|\d+[\.:：])\s*(?:与|和)[^。]{0,20}各摸${NUM}张牌`
 	);
+	// 兼容“……然后与XXX各摸X张牌”（“你与”被省略，但同句前部通常已出现“你”）。
+	const reThenMutualDrawWithYouContext = new RegExp(String.raw`你[^。]{0,120}(?:然后|并|再|接着)?\s*(?:与|和)[^。]{0,20}各摸${NUM}张牌`);
 
 	const HAND_COUNT_TARGET = String.raw`(?:${NUM}|手牌上限|体力上限|角色数|上限)`;
 	const HAND_COUNT_SUFFIX = String.raw`(?:张(?:牌)?)?`;
@@ -67,6 +74,40 @@ export function createDrawSelfProcessor() {
 	// 翻倍：下次摸牌翻倍/令自己本回合下次摸牌翻倍
 	const reDrawDouble = /摸牌翻倍/;
 
+	/**
+	 * 判断“你可以/可……摸X张牌”是否为“你自摸”（排除“你可以令XXX摸牌”）。
+	 *
+	 * @param {string} text
+	 * @returns {boolean}
+	 */
+	function matchesYouCanDraw(text) {
+		if (!text) return false;
+		reYouCanDraw.lastIndex = 0;
+		for (let m = reYouCanDraw.exec(text); m; m = reYouCanDraw.exec(text)) {
+			const between = String(m[1] || "");
+			if (between.includes("令")) continue;
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * 判断“当你……时，可以/可……摸X张牌”是否为“你自摸”（排除“……可以令XXX摸牌”）。
+	 *
+	 * @param {string} text
+	 * @returns {boolean}
+	 */
+	function matchesWhenYouCanDraw(text) {
+		if (!text) return false;
+		reWhenYouCanDraw.lastIndex = 0;
+		for (let m = reWhenYouCanDraw.exec(text); m; m = reWhenYouCanDraw.exec(text)) {
+			const between = String(m[1] || "");
+			if (between.includes("令")) continue;
+			return true;
+		}
+		return false;
+	}
+
 	return {
 		id: "draw_self",
 		description: "识别技能说明中“自己摸牌/补牌”的收益",
@@ -78,13 +119,17 @@ export function createDrawSelfProcessor() {
 				!(
 					reYouDraw.test(text) ||
 					reMutualDraw.test(text) ||
-					reYouCanDraw.test(text) ||
+					reAllEachDraw.test(text) ||
+					reAllDraw.test(text) ||
+					matchesYouCanDraw(text) ||
+					matchesWhenYouCanDraw(text) ||
 					reThenDraw.test(text) ||
 					reOrDraw.test(text) ||
 					reBare.test(text) ||
 					reBareAfterComma.test(text) ||
 					reRewriteToDraw.test(text) ||
 					reOptionMutualDraw.test(text) ||
+					reThenMutualDrawWithYouContext.test(text) ||
 					reToHandCountSelf.test(text) ||
 					reToCountSelfBare.test(text) ||
 					reToHandCountMutual.test(text) ||

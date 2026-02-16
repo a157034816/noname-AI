@@ -34,7 +34,11 @@ import {
   onDiscardAfterTurnMemory,
   onLoseToDiscardpileAfterTurnMemory,
 } from "./events/turn_memory_events.js";
-import { installDefaultScoreHooks } from "./strategies/default_score_hooks.js";
+import {
+  installDefaultScoreHooks,
+  shouldForbidRescueRecentAttackInChooseBool,
+  shouldForceZhuRound1AoeProbeInChooseBool,
+} from "./strategies/default_score_hooks.js";
 import { installChooseCharacterBias } from "./strategies/choose_character_bias.js";
 import { installPersonaSkills } from "./skills/persona_skills.js";
 
@@ -137,6 +141,17 @@ export function installPersonaSystem({ lib, game, get, ai, _status, config }) {
 		config?.slqj_ai_blind_handcard_random ?? lib.config.slqj_ai_blind_handcard_random ?? true;
 	const scoreNoiseEnable =
 		config?.slqj_ai_score_noise_enable ?? lib.config.slqj_ai_score_noise_enable ?? true;
+	const outputCoreDrawThresholdRaw =
+		config?.slqj_ai_output_core_draw_threshold ?? lib.config.slqj_ai_output_core_draw_threshold;
+	const outputCoreDamageThresholdRaw =
+		config?.slqj_ai_output_core_damage_threshold ??
+		lib.config.slqj_ai_output_core_damage_threshold;
+	const outputCoreDrawThreshold = Number.isFinite(Number(outputCoreDrawThresholdRaw))
+		? Number(outputCoreDrawThresholdRaw)
+		: 8;
+	const outputCoreDamageThreshold = Number.isFinite(Number(outputCoreDamageThresholdRaw))
+		? Number(outputCoreDamageThresholdRaw)
+		: 3;
 	const personaEnabled = {
 		balanced: !!(
 			config?.slqj_ai_persona_enable_balanced ??
@@ -179,6 +194,8 @@ export function installPersonaSystem({ lib, game, get, ai, _status, config }) {
 		inspectEnable,
 		blindHandcardRandom,
 		scoreNoiseEnable,
+		outputCoreDrawThreshold,
+		outputCoreDamageThreshold,
 		personaEnabled,
 		identityCounts,
 	};
@@ -199,6 +216,8 @@ export function installPersonaSystem({ lib, game, get, ai, _status, config }) {
 	game.__slqjAiPersona.onUseCardAfterBasicTempo = onUseCardAfterBasicTempo;
 	game.__slqjAiPersona.onRecentAttackMark = onRecentAttackMark;
 	game.__slqjAiPersona.onRecentAttackClear = onRecentAttackClear;
+	game.__slqjAiPersona.shouldForbidRescueRecentAttackInChooseBool = shouldForbidRescueRecentAttackInChooseBool;
+	game.__slqjAiPersona.shouldForceZhuRound1AoeProbeInChooseBool = shouldForceZhuRound1AoeProbeInChooseBool;
 	game.__slqjAiPersona.onDamageEndRage = onDamageEndRage;
 	game.__slqjAiPersona.onRecoverEndRage = onRecoverEndRage;
 	game.__slqjAiPersona.onRewriteDiscardResultRage = onRewriteDiscardResultRage;

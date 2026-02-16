@@ -9,9 +9,11 @@ import { NUM } from "../../patterns.js";
 
 export function createGainOtherCardsProcessor() {
 	const CARD_TAIL = String.raw`[^。]{0,10}(?:手牌|牌)`;
-	const re1 = new RegExp(String.raw`获得(?:其|该角色|目标角色|目标)[^。]{0,30}(?:至少|至多)?(?:${NUM}|任意)张${CARD_TAIL}`);
-	const re2 = new RegExp(String.raw`获得(?:其|该角色|目标角色|目标)区域内的[^。]{0,30}牌`);
-	const re3 = new RegExp(String.raw`获得(?:其|该角色|目标角色|目标)[^。]{0,30}弃置的[^。]{0,30}牌`);
+	// 注意：“获得其中/其余…”通常是“从展示/牌堆顶/集合中取牌”，并非“获得其（他人）的牌”，这里排除“其(中/余)”前缀。
+	const OTHER_PRONOUN = String.raw`(?:其(?!中|余)|该角色|目标角色|目标)`;
+	const re1 = new RegExp(String.raw`获得${OTHER_PRONOUN}[^。]{0,30}(?:至少|至多)?(?:${NUM}|任意)张${CARD_TAIL}`);
+	const re2 = new RegExp(String.raw`获得${OTHER_PRONOUN}区域内的[^。]{0,30}牌`);
+	const re3 = new RegExp(String.raw`获得${OTHER_PRONOUN}[^。]{0,30}弃置的[^。]{0,30}牌`);
 	// 兼容：“获得一名其他角色两张手牌/获得…其他角色一张手牌”。
 	const reOtherRoleHand = new RegExp(String.raw`获得[^。]{0,20}其他角色[^。]{0,20}(?:至少|至多)?(?:${NUM}|任意)张${CARD_TAIL}`);
 	// 兼容：“随机获得一名其他角色手牌中的…牌”。

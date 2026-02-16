@@ -1,13 +1,12 @@
 import { checkForUpdate } from "./updater.js";
 
-const AUTO_CHECK_INTERVAL_MS = 12 * 60 * 60 * 1000;
 const LAST_CHECK_KEY = "slqj_ai_update_last_check_ts";
 
 /**
- * 启动时自动检查更新（节流），不自动弹窗、不自动更新。
+ * 启动时自动检查更新（每次启动最多一次），不负责弹窗、不自动更新。
  *
  * @param {{baseUrl:string, lib:any, game:any, config:any, currentVersion:string, connectMode?:boolean}} opts
- * @returns {Promise<void>}
+ * @returns {Promise<any|null>}
  */
 export async function maybeAutoCheckForUpdates(opts) {
   const game = opts?.game;
@@ -15,19 +14,16 @@ export async function maybeAutoCheckForUpdates(opts) {
   const config = opts?.config;
 
   const connectMode = !!opts?.connectMode;
-  if (connectMode) return;
+  if (connectMode) return null;
 
   const enabled = config?.slqj_ai_update_auto_check ?? lib?.config?.slqj_ai_update_auto_check ?? true;
-  if (!enabled) return;
+  if (!enabled) return null;
 
   const now = Date.now();
-  const lastRaw = config?.[LAST_CHECK_KEY] ?? lib?.config?.[LAST_CHECK_KEY];
-  const last = Number(lastRaw || 0) || 0;
-  if (now - last < AUTO_CHECK_INTERVAL_MS) return;
 
   // 仅每次启动最多执行一次，避免某些环境反复加载 precontent。
   try {
-    if (game && game.__slqjAiUpdateAutoChecked) return;
+    if (game && game.__slqjAiUpdateAutoChecked) return null;
     if (game) game.__slqjAiUpdateAutoChecked = true;
   } catch (e) {}
 
@@ -40,7 +36,7 @@ export async function maybeAutoCheckForUpdates(opts) {
   } catch (e) {}
 
   const currentVersion = String(opts?.currentVersion || "").trim();
-  if (!currentVersion) return;
+  if (!currentVersion) return null;
 
   const result = await checkForUpdate({ currentVersion });
   try {
@@ -59,5 +55,6 @@ export async function maybeAutoCheckForUpdates(opts) {
       );
     }
   } catch (e) {}
-}
 
+  return result;
+}

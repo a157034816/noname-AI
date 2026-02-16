@@ -1,4 +1,5 @@
 import { isAiPersonaTrackedPlayer, ensureStorage, getPid } from "../lib/utils.js";
+import { rollOutputCoreTurnWindow } from "../stats.js";
 
 /**
  * @typedef {import("../lib/jsdoc_types.js").SlqjAiTurnEvent} SlqjAiTurnEvent
@@ -144,6 +145,8 @@ export function onPhaseBeginStartTurnMemoryReset(trigger, game, _status) {
 	const state = ensureTurnMemoryState(game);
 	state.id = (state.id || 0) + 1;
 	state.activePid = getPid(trigger.player);
+	// 同步推进“输出核心两回合窗口”：以 phaseBeginStart 作为“自身回合开始”的锚点
+	if (trigger.player) rollOutputCoreTurnWindow(trigger.player);
 
 	for (const observer of game.players || []) {
 		if (!isAiPersonaTrackedPlayer(observer, game, _status)) continue;

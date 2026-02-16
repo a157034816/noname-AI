@@ -25,6 +25,15 @@ export function createDiscardSelfProcessor() {
 	// 兼容：“……然后弃置X张牌/并弃置X张牌”。
 	const reThen = new RegExp(String.raw`(?:然后|并|再|接着)\s*弃置(?:至少|至多)?(?:${NUM}|任意)张${CARD_TAIL}`);
 	const reAll = /你弃置(?:所有|全部)(?:手牌|牌)/;
+	// “令所有角色/全体角色弃置所有牌”中包含你自己，也应视为“涉及自己弃牌”。
+	const reLingAllRolesDiscardAll = /(?:令|使(?!用))[^。]{0,20}(?:所有角色|全体角色)[^。]{0,20}弃置(?:所有|全部)(?:手牌|牌)/;
+	// “令你与XXX各弃置/依次弃置…”：明确包含你自己弃牌。
+	const reLingYouMutualEachDiscard = new RegExp(
+		String.raw`令你(?:与|和)[^。]{0,80}各弃置(?:至少|至多)?(?:${NUM}|任意)张${CARD_TAIL}`
+	);
+	const reLingYouMutualSequentialDiscard = new RegExp(
+		String.raw`令你(?:与|和)[^。]{0,120}同时[^。]{0,120}依次弃置(?:至少|至多)?(?:${NUM}|任意)张${CARD_TAIL}`
+	);
 	const reAllByFilter = new RegExp(String.raw`你(?:可|可以)?弃置([^。]{0,20})的所有(?:手牌|牌)`, "g");
 	const reDiscardGainedHandcards = /你弃置[^。]{0,30}获得的手牌/;
 	// 兼容：“你弃置…展示的手牌”（常见于“展示→弃置展示牌”口径）。
@@ -155,6 +164,9 @@ export function createDiscardSelfProcessor() {
 					matchesBareDiscardSelf(text) ||
 					reThen.test(text) ||
 					reAll.test(text) ||
+					reLingAllRolesDiscardAll.test(text) ||
+					reLingYouMutualEachDiscard.test(text) ||
+					reLingYouMutualSequentialDiscard.test(text) ||
 					matchesDiscardAllByFilterSelf(text) ||
 					reDiscardGainedHandcards.test(text) ||
 					reDiscardDisplayedHandcards.test(text) ||

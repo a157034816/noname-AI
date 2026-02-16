@@ -1,6 +1,9 @@
 import { isLocalAIPlayer } from "../src/ai_persona/lib/utils.js";
 import { guessIdentityFor } from "../src/ai_persona/guess_identity.js";
 
+// 此脚本有点问题
+return;
+
 /**
  * @typedef {import("../src/scripts_loader.js").SlqjAiScriptContext} SlqjAiScriptContext
  */

@@ -6,7 +6,7 @@ import { SLQJ_AI_UPDATE_REPO } from "../version.js";
 /**
  * 打开“检查更新/一键更新”弹窗。
  *
- * @param {{baseUrl:string, lib:any, game:any, ui:any, config:any, currentVersion:string}} opts
+ * @param {{baseUrl:string, lib:any, game:any, ui:any, config:any, currentVersion:string, initialCheck?:any}} opts
  * @returns {Promise<void>}
  */
 export async function openUpdateModal(opts) {
@@ -35,6 +35,20 @@ export async function openUpdateModal(opts) {
   };
 
   state.writable = await canWriteFiles({ game });
+
+  // 若启动时已完成检查，可直接复用结果，避免重复请求。
+  const initialCheck = opts?.initialCheck;
+  if (initialCheck) {
+    state.lastCheck = initialCheck;
+    try {
+      if (game) game.__slqjAiUpdateState = { checkedAt: Date.now(), ...initialCheck };
+    } catch (e) {}
+    if (initialCheck.ok) {
+      shell.setStatus(initialCheck.updateAvailable ? "发现新版本：可点击“下载并更新”" : "已是最新版本");
+    } else {
+      shell.setStatus("检查失败：" + String(initialCheck.error || "unknown"));
+    }
+  }
 
   const info = document.createElement("div");
   info.className = "slqj-ai-empty";
@@ -152,7 +166,7 @@ export async function openUpdateModal(opts) {
 
   // 打开弹窗后自动检查一次（不自动更新）
   try {
-    await doCheck();
+    if (!state.lastCheck) await doCheck();
   } catch (e) {}
 }
 

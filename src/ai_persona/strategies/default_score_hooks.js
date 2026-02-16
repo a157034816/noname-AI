@@ -18,6 +18,27 @@ import {
 } from "../lib/identity_utils.js";
 import { STORAGE_KEY } from "../lib/constants.js";
 import { getPid } from "../lib/utils.js";
+import {
+	TAG_ACTIVE_MAIXIE,
+	TAG_CONTROL_LINK,
+	TAG_CONTROL_TURNOVER,
+	TAG_DAMAGE_OTHER,
+	TAG_DISCARD_OTHER,
+	TAG_DRAW_OTHER,
+	TAG_DRAW_SELF,
+	TAG_FORBID_SHA,
+	TAG_GAIN_OTHER_CARDS,
+	TAG_GIVE_CARDS,
+	TAG_MAIXIE,
+	TAG_PASSIVE_MAIXIE,
+	TAG_RECOVER_OTHER,
+	TAG_RECOVER_SELF,
+	TAG_REJUDGE,
+	TAG_SAVE,
+	TAG_SHA_EXTRA,
+	TAG_SHA_UNLIMITED,
+} from "../skill_custom_tags/tags.js";
+import { NUM } from "../skill_custom_tags/patterns.js";
 
 /**
  * 夹逼到闭区间。
@@ -596,6 +617,242 @@ function safeGetSkillInfo(skill, get) {
 }
 
 /**
+ * 安全读取 player.hasSkillTag(...)（异常/缺失时回退 false）。
+ *
+ * @param {*} player
+ * @param {string} tag
+ * @param {*} [hidden]
+ * @param {*} [arg]
+ * @param {boolean} [globalskill]
+ * @returns {boolean}
+ */
+function safeHasSkillTag(player, tag, hidden, arg, globalskill) {
+	if (!player || typeof player.hasSkillTag !== "function") return false;
+	try {
+		return !!player.hasSkillTag(tag, hidden, arg, globalskill);
+	} catch (e) {
+		return false;
+	}
+}
+
+/**
+ * 安全获取玩家技能列表（包含 invisible/hidden；不含装备）。
+ *
+ * @param {*} player
+ * @returns {string[]}
+ */
+function safeGetPlayerSkillIds(player) {
+	if (!player || typeof player.getSkills !== "function") return [];
+	try {
+		const list = player.getSkills("invisible", false, false) || [];
+		if (Array.isArray(list)) return list.map(x => String(x || "")).filter(Boolean);
+	} catch (e) {
+		// ignore
+	}
+	try {
+		const list = player.getSkills() || [];
+		if (Array.isArray(list)) return list.map(x => String(x || "")).filter(Boolean);
+	} catch (e) {
+		// ignore
+	}
+	return [];
+}
+
+/**
+ * 判断某角色是否可能属于“卖血型目标”。
+ *
+ * 说明：
+ * - 兼容引擎内置 tag：`maixie/maixie_defend/maixie_hp`
+ * - 兼容扩展自定义 tag：`slqj_ai_maixie/slqj_ai_passive_maixie/slqj_ai_active_maixie`
+ *
+ * @param {*} target
+ * @returns {boolean}
+ */
+function isMaixieLikeTarget(target) {
+	return (
+		safeHasSkillTag(target, "maixie") ||
+		safeHasSkillTag(target, "maixie_defend") ||
+		safeHasSkillTag(target, "maixie_hp") ||
+		safeHasSkillTag(target, TAG_MAIXIE) ||
+		safeHasSkillTag(target, TAG_PASSIVE_MAIXIE) ||
+		safeHasSkillTag(target, TAG_ACTIVE_MAIXIE)
+	);
+}
+
+/**
+ * 判断一次 chooseTarget 决策是否“更像伤害/失去体力”语义（用于卖血收益门禁）。
+ *
+ * @param {*} event
+ * @param {*} get
+ * @returns {boolean}
+ */
+function isDamageLikeChooseTargetEvent(event, get) {
+	const card = findEventCard(event);
+	if (card) {
+		if (safeGetCardAiTag(card, "damage", get) || safeGetCardAiTag(card, "loseHp", get)) return true;
+		const name = String(card?.name || card?.viewAs || "");
+		if (
+			name === "sha" ||
+			name === "juedou" ||
+			name === "huogong" ||
+			name === "nanman" ||
+			name === "wanjian" ||
+			name === "shandian" ||
+			name === "fulei"
+		) {
+			return true;
+		}
+		return false;
+	}
+
+	const skill = typeof event?.skill === "string" ? String(event.skill || "") : "";
+	if (!skill) return false;
+	const info = safeGetSkillInfo(skill, get);
+	const ai = info?.ai;
+	if (!ai || typeof ai !== "object") return false;
+
+	if (ai[TAG_DAMAGE_OTHER]) return true;
+	// 兼容少量技能直接声明 ai.tag.damage/loseHp
+	const tag = ai.tag;
+	if (tag && typeof tag === "object") {
+		try {
+			if (!!tag.damage || !!tag.loseHp) return true;
+		} catch (e) {
+			// ignore
+		}
+	}
+	return false;
+}
+
+/**
+ * 估算“卖血目标在受到伤害/失去体力后获得的收益强度”（轻量启发式）。
+ *
+ * 设计目标：
+ * - 在进攻决策（chooseTarget）阶段避免无意义地“喂卖血”
+ * - 不精确模拟技能结算，仅区分“过牌/回血/拿牌/反制伤害/控制/救援”等收益
+ *
+ * 口径：
+ * - 仅统计同时带有卖血标记的技能，避免把目标其他无关收益技能算入
+ * - 若无法识别具体收益但目标确有卖血标签，则返回保守默认值（被动≈2.0，主动≈1.0）
+ *
+ * @param {*} target
+ * @param {*} event
+ * @param {*} get
+ * @returns {{isMaixie:boolean, hasPassive:boolean, reward:number}}
+ */
+function estimateMaixieRewardOnDamaged(target, event, get) {
+	if (!target) return { isMaixie: false, hasPassive: false, reward: 0 };
+
+	// 事件内缓存：避免同一次 chooseTarget 评分链反复扫描技能
+	try {
+		if (event && typeof event === "object") {
+			const pid = getPid(target);
+			if (pid) {
+				const cache =
+					event.__slqjAiMaixieRewardOnDamaged || (event.__slqjAiMaixieRewardOnDamaged = Object.create(null));
+				const hit = cache[pid];
+				if (hit && typeof hit === "object") {
+					return {
+						isMaixie: !!hit.isMaixie,
+						hasPassive: !!hit.hasPassive,
+						reward: typeof hit.reward === "number" && !Number.isNaN(hit.reward) ? hit.reward : 0,
+					};
+				}
+			}
+		}
+	} catch (e) {
+		// ignore
+	}
+
+	const isMaixie = isMaixieLikeTarget(target);
+	if (!isMaixie) return { isMaixie: false, hasPassive: false, reward: 0 };
+
+	const skillIds = safeGetPlayerSkillIds(target);
+	let reward = 0;
+	let hasPassive = false;
+
+	for (const sid0 of skillIds) {
+		const sid = String(sid0 || "");
+		if (!sid) continue;
+		const info = safeGetSkillInfo(sid, get);
+		const ai = info?.ai;
+		if (!ai || typeof ai !== "object") continue;
+
+		const maixieSkill =
+			!!ai.maixie ||
+			!!ai.maixie_defend ||
+			!!ai.maixie_hp ||
+			!!ai[TAG_MAIXIE] ||
+			!!ai[TAG_PASSIVE_MAIXIE] ||
+			!!ai[TAG_ACTIVE_MAIXIE];
+
+		if (!maixieSkill) continue;
+
+		const passive =
+			!!ai[TAG_PASSIVE_MAIXIE] ||
+			!!ai.maixie_defend ||
+			!!ai.maixie_hp ||
+			(!!ai.maixie && !ai[TAG_ACTIVE_MAIXIE]);
+
+		if (passive) hasPassive = true;
+
+		// 主动卖血：被打不一定立刻触发收益，因此权重更低（但仍可能“配合血线/资源节奏”有价值）
+		const factor = passive ? 1 : ai[TAG_ACTIVE_MAIXIE] ? 0.25 : 0.6;
+
+		let r = 0;
+
+		// 自身收益（更关键）
+		if (ai[TAG_DRAW_SELF]) r += 2.4;
+		if (ai[TAG_GAIN_OTHER_CARDS]) r += 2.0;
+		if (ai[TAG_DISCARD_OTHER]) r += 1.8;
+		if (ai[TAG_RECOVER_SELF]) r += 2.0;
+		if (ai[TAG_DAMAGE_OTHER]) r += 1.9;
+		if (ai[TAG_CONTROL_TURNOVER]) r += 1.5;
+		if (ai[TAG_CONTROL_LINK]) r += 1.0;
+		if (ai[TAG_REJUDGE]) r += 1.2;
+		if (ai[TAG_SAVE]) r += 1.6;
+
+		// 团队型收益：仍算“被打后赚到资源/节奏”，但权重略低
+		if (ai[TAG_DRAW_OTHER]) r += 1.2;
+		if (ai[TAG_GIVE_CARDS]) r += 1.0;
+		if (ai[TAG_RECOVER_OTHER]) r += 1.2;
+
+		if (r > 0) reward += r * factor;
+	}
+
+	// 若扫描不到细分收益，但确认为卖血：给保守默认值（用户假设：卖血一定有附加效果）
+	if (!(reward > 0)) {
+		const passiveTag =
+			safeHasSkillTag(target, TAG_PASSIVE_MAIXIE) ||
+			safeHasSkillTag(target, "maixie_defend") ||
+			safeHasSkillTag(target, "maixie_hp") ||
+			safeHasSkillTag(target, "maixie");
+		hasPassive = hasPassive || passiveTag;
+		reward = hasPassive ? 2.0 : 1.0;
+	}
+
+	reward = clampNumber(reward, 0, 8);
+
+	const out = { isMaixie: true, hasPassive, reward };
+
+	// 写入事件缓存
+	try {
+		if (event && typeof event === "object") {
+			const pid = getPid(target);
+			if (pid) {
+				const cache =
+					event.__slqjAiMaixieRewardOnDamaged || (event.__slqjAiMaixieRewardOnDamaged = Object.create(null));
+				cache[pid] = out;
+			}
+		}
+	} catch (e) {
+		// ignore
+	}
+
+	return out;
+}
+
+/**
  * 尝试读取技能的 prompt 文案（用于“技能型过牌”启发式识别）。
  *
  * @param {string} skill
@@ -636,6 +893,488 @@ function safeGetSkillPromptText(skill, info, event, player, get) {
 }
 
 /**
+ * 将常见数字表达式粗略解析为 number（仅用于启发式估算）。
+ *
+ * 说明：
+ * - 支持：纯阿拉伯数字、`[0]` 占位、常见中文数字（含“两”）、十进位（十/二十/二十三）
+ * - 不支持：X/Y/×、表达式（X+1）、“体力上限/已损失体力值”等语义数字（返回 NaN）
+ *
+ * @param {string} expr
+ * @returns {number}
+ */
+function parseApproxNumber(expr) {
+	const s0 = String(expr || "").trim();
+	if (!s0) return NaN;
+	const s = s0.replace(/\s+/g, "");
+
+	const mBracket = /^\[(\d+)\]$/.exec(s);
+	if (mBracket) return Number(mBracket[1]);
+
+	if (/^\d+$/.test(s)) return Number(s);
+
+	if (/^[XY×]$/.test(s)) return NaN;
+	if (/[+-]/.test(s)) return NaN;
+
+	/** @type {Record<string, number>} */
+	const map = {
+		零: 0,
+		一: 1,
+		二: 2,
+		两: 2,
+		三: 3,
+		四: 4,
+		五: 5,
+		六: 6,
+		七: 7,
+		八: 8,
+		九: 9,
+	};
+
+	if (Object.prototype.hasOwnProperty.call(map, s)) return map[s];
+
+	if (s === "十") return 10;
+	if (s.includes("十")) {
+		const [a, b] = s.split("十");
+		const tens = a ? map[a] : 1;
+		const ones = b ? map[b] : 0;
+		if (typeof tens === "number" && typeof ones === "number") return tens * 10 + ones;
+		return NaN;
+	}
+
+	return NaN;
+}
+
+/**
+ * 从手牌中查找指定牌名的第一张牌。
+ *
+ * @param {*} player
+ * @param {string} name
+ * @returns {*|null}
+ */
+function safeFindHandCardByName(player, name) {
+	if (!player || typeof name !== "string" || !name) return null;
+	const cards = safeGetCards(player, "h");
+	for (const c of cards) {
+		if (!c) continue;
+		if (String(c?.name || "") === name) return c;
+	}
+	return null;
+}
+
+/**
+ * 选取用于“连弩起爆”的诸葛连弩牌（优先已装备，其次手牌）。
+ *
+ * @param {*} player
+ * @param {*} get
+ * @returns {{card:any|null, equipped:boolean}}
+ */
+function pickZhugeCandidateCard(player, get) {
+	const weapon = safeGetWeaponCard(player, get);
+	if (weapon && String(weapon?.name || "") === "zhuge") return { card: weapon, equipped: true };
+	const inHand = safeFindHandCardByName(player, "zhuge");
+	if (inHand) return { card: inHand, equipped: false };
+	return { card: null, equipped: false };
+}
+
+/**
+ * 估算装备指定武器后是否存在“可攻击的敌对目标”（用于判定是否会卡距离）。
+ *
+ * 说明：
+ * - 只做距离层面的轻量近似：只检查“是否有任一敌对目标在攻击范围内”
+ * - 范围估算：用 `getAttackRange` 与 `getEquipRange` 拆出“技能/其他修正的增量”，再替换武器后重算
+ *
+ * @param {*} player
+ * @param {*} weaponCard
+ * @param {*} game
+ * @param {*} get
+ * @returns {{known:boolean, predictedRange:number, hasEnemyInRange:boolean}}
+ */
+function estimateEnemyInRangeAfterEquippingWeapon(player, weaponCard, game, get) {
+	const out = { known: false, predictedRange: 1, hasEnemyInRange: false };
+	if (!player || !weaponCard || !game) return out;
+
+	let currentRange = 1;
+	try {
+		if (typeof player?.getAttackRange === "function") {
+			const v = player.getAttackRange();
+			if (typeof v === "number" && Number.isFinite(v)) currentRange = v;
+		}
+	} catch (e) {
+		currentRange = 1;
+	}
+
+	let predictedRange = currentRange;
+
+	// 若 weaponCard 就是当前已装备武器，则直接用当前攻击范围（无需模拟替换）
+	const currentWeapon = safeGetWeaponCard(player, get);
+	if (currentWeapon && currentWeapon === weaponCard) {
+		predictedRange = currentRange;
+		out.known = true;
+	} else if (typeof player?.getEquipRange === "function") {
+		const equipsAll = safeGetCards(player, "e");
+		let equipRange = 1;
+		try {
+			const v = player.getEquipRange();
+			if (typeof v === "number" && Number.isFinite(v)) equipRange = v;
+		} catch (e) {
+			equipRange = 1;
+		}
+
+		const modDelta = Number.isFinite(currentRange) ? currentRange - equipRange : 0;
+		const equipsWithoutWeapon = currentWeapon ? equipsAll.filter(c => c && c !== currentWeapon) : equipsAll.slice();
+
+		let equipRangeWithWeapon = 1;
+		try {
+			const v = player.getEquipRange(equipsWithoutWeapon.concat([weaponCard]));
+			if (typeof v === "number" && Number.isFinite(v)) equipRangeWithWeapon = v;
+		} catch (e) {
+			equipRangeWithWeapon = 1;
+		}
+
+		predictedRange = equipRangeWithWeapon + (Number.isFinite(modDelta) ? modDelta : 0);
+		if (!Number.isFinite(predictedRange)) predictedRange = equipRangeWithWeapon;
+		predictedRange = Math.max(1, predictedRange);
+
+		out.known = true;
+	} else {
+		return out;
+	}
+
+	out.predictedRange = predictedRange;
+
+	for (const p of game.players || []) {
+		if (!p || p === player) continue;
+		try {
+			if (typeof p.isDead === "function" && p.isDead()) continue;
+		} catch (e) {
+			// ignore
+		}
+
+		const att = safeAttitude(get, player, p);
+		if (att >= -0.6) continue;
+		const dist = safeDistance(get, player, p);
+		if (!Number.isFinite(dist) || dist <= 0) continue;
+		if (dist <= predictedRange + 0.001) {
+			out.hasEnemyInRange = true;
+			break;
+		}
+	}
+
+	return out;
+}
+
+/**
+ * 统计“友方（态度>0.6）手牌中的桃数量”（用于“卖血梭哈”的救援兜底门槛）。
+ *
+ * @param {*} player
+ * @param {*} game
+ * @param {*} get
+ * @returns {number}
+ */
+function countFriendlyTaoInHand(player, game, get) {
+	if (!player || !game) return 0;
+	let total = 0;
+	for (const p of game.players || []) {
+		if (!p || p === player) continue;
+		try {
+			if (typeof p.isDead === "function" && p.isDead()) continue;
+		} catch (e) {
+			// ignore
+		}
+		const att = safeAttitude(get, player, p);
+		if (att <= 0.6) continue;
+		total += safeCountCardsByName(p, "h", "tao");
+	}
+	return total;
+}
+
+/**
+ * 估算主动卖血技能的“每 1 点体力可换到的牌量”（一血换二牌≈2，为小赚）。
+ *
+ * 说明：
+ * - 仅用于“连弩起爆梭哈”判断：要求至少达到“一血换二牌”才视为值得梭哈
+ * - 优先从 prompt/_info 文案中提取“失去X点体力/受伤X点 + 摸Y张牌/获得Y张牌”
+ * - 若无法从文案提取，但已被标注为 `slqj_ai_draw_self`，则保守按 2 张牌估算
+ *
+ * @param {string} skill
+ * @param {*} info
+ * @param {*} player
+ * @param {*} event
+ * @param {*} get
+ * @returns {{known:boolean, hpCost:number, cardGain:number, cardsPerHp:number}}
+ */
+function estimateActiveMaixieCardEconomy(skill, info, player, event, get) {
+	const ai = info?.ai;
+	if (!ai || typeof ai !== "object") return { known: false, hpCost: 1, cardGain: 0, cardsPerHp: 0 };
+	if (!ai[TAG_ACTIVE_MAIXIE]) return { known: false, hpCost: 1, cardGain: 0, cardsPerHp: 0 };
+
+	const promptText = safeGetSkillPromptText(skill, info, event, player, get);
+	const text = String(promptText || "").replace(/\s+/g, "");
+
+	let hpCost = 1;
+	let cardGain = 0;
+
+	// 体力代价（失去体力/受伤）
+	const reLoseHp = new RegExp(String.raw`失去\\s*(${NUM})\\s*点体力`);
+	const reTakeDmg = new RegExp(String.raw`受到\\s*(${NUM})\\s*点伤害`);
+	const mLose = reLoseHp.exec(text);
+	const mDmg = mLose ? null : reTakeDmg.exec(text);
+	const costExpr = String(mLose?.[1] || mDmg?.[1] || "");
+	const costNum = parseApproxNumber(costExpr);
+	if (Number.isFinite(costNum) && costNum > 0) hpCost = costNum;
+
+	// 拿牌收益（尽量取“最大数字”，兼容少量“选项/分支”文案）
+	let best = NaN;
+	const reDraw = new RegExp(String.raw`摸\\s*(${NUM})\\s*张牌`, "g");
+	const reGain = new RegExp(String.raw`获得\\s*(${NUM})\\s*张牌`, "g");
+	reDraw.lastIndex = 0;
+	for (let m = reDraw.exec(text); m; m = reDraw.exec(text)) {
+		const n = parseApproxNumber(String(m[1] || ""));
+		if (Number.isFinite(n) && n > 0) best = Number.isFinite(best) ? Math.max(best, n) : n;
+	}
+	reGain.lastIndex = 0;
+	for (let m = reGain.exec(text); m; m = reGain.exec(text)) {
+		const n = parseApproxNumber(String(m[1] || ""));
+		if (Number.isFinite(n) && n > 0) best = Number.isFinite(best) ? Math.max(best, n) : n;
+	}
+
+	if (Number.isFinite(best) && best > 0) {
+		cardGain = best;
+	} else if (ai[TAG_DRAW_SELF]) {
+		// 保守默认：主动卖血摸牌的典型口径（苦肉）为 1 血换 2 牌
+		cardGain = 2;
+	} else if (ai[TAG_GAIN_OTHER_CARDS]) {
+		// 获得牌的口径差异较大，这里不强行拉高，避免误把“1 血换 1 牌”当作梭哈条件
+		cardGain = 1;
+	}
+
+	const cardsPerHp = hpCost > 0 ? cardGain / hpCost : 0;
+	return { known: true, hpCost, cardGain, cardsPerHp };
+}
+
+/**
+ * 判断是否满足“连弩起爆前梭哈主动卖血拿牌”的条件。
+ *
+ * 触发思想：
+ * - 主动卖血摸牌若达到“一血换二牌”及以上，越多越赚
+ * - 若手里（或已装备）有【诸葛连弩】且不会卡距离，并且存在救援兜底（自己或友方有桃），则可以更激进地连续卖血拿牌
+ *
+ * @param {*} player
+ * @param {string} skill
+ * @param {*} info
+ * @param {*} event
+ * @param {*} game
+ * @param {*} get
+ * @returns {{
+ *  ok:boolean,
+ *  economy: ReturnType<typeof estimateActiveMaixieCardEconomy>,
+ *  zhugeEquipped:boolean,
+ *  predictedRange:number,
+ *  selfTao:number,
+ *  allyTao:number,
+ * }}
+ */
+function getActiveMaixieZhugeAllInContext(player, skill, info, event, game, get) {
+	const empty = {
+		ok: false,
+		economy: { known: false, hpCost: 1, cardGain: 0, cardsPerHp: 0 },
+		zhugeEquipped: false,
+		predictedRange: 1,
+		selfTao: 0,
+		allyTao: 0,
+	};
+	if (!player || !info || !game) return empty;
+	const ai = info?.ai;
+	if (!ai || typeof ai !== "object") return empty;
+	if (!ai[TAG_ACTIVE_MAIXIE]) return empty;
+
+	// 事件内缓存：避免同一次 chooseCard/chooseButton 评分链反复扫描（计数桃、估算卡距离等）。
+	const pid = getPid(player);
+	const key = pid ? `${pid}|${String(skill || "")}` : "";
+	try {
+		if (event && typeof event === "object" && key) {
+			const cache =
+				event.__slqjAiActiveMaixieZhugeAllInContext ||
+				(event.__slqjAiActiveMaixieZhugeAllInContext = Object.create(null));
+			const hit = cache[key];
+			if (hit && typeof hit === "object") return hit;
+		}
+	} catch (e) {
+		// ignore
+	}
+
+	/**
+	 * @param {ReturnType<typeof getActiveMaixieZhugeAllInContext>} out
+	 * @returns {ReturnType<typeof getActiveMaixieZhugeAllInContext>}
+	 */
+	function writeCache(out) {
+		try {
+			if (event && typeof event === "object" && key) {
+				const cache =
+					event.__slqjAiActiveMaixieZhugeAllInContext ||
+					(event.__slqjAiActiveMaixieZhugeAllInContext = Object.create(null));
+				cache[key] = out;
+			}
+		} catch (e) {
+			// ignore
+		}
+		return out;
+	}
+
+	// 若自己被禁杀，则“连弩爆发”逻辑不成立
+	if (safeHasSkillTag(player, TAG_FORBID_SHA)) return writeCache(empty);
+
+	const economy = estimateActiveMaixieCardEconomy(skill, info, player, event, get);
+	if (!(economy.cardsPerHp >= 1.95)) return writeCache(Object.assign({}, empty, { economy }));
+
+	const selfTao = safeCountCardsByName(player, "h", "tao");
+	const allyTao = countFriendlyTaoInHand(player, game, get);
+	if (!(selfTao > 0 || allyTao > 0)) return writeCache(Object.assign({}, empty, { economy, selfTao, allyTao }));
+
+	const z = pickZhugeCandidateCard(player, get);
+	if (!z.card) return writeCache(Object.assign({}, empty, { economy, selfTao, allyTao }));
+
+	const r = estimateEnemyInRangeAfterEquippingWeapon(player, z.card, game, get);
+	if (!r.known || !r.hasEnemyInRange) {
+		return writeCache(
+			Object.assign({}, empty, {
+				economy,
+				zhugeEquipped: !!z.equipped,
+				predictedRange: r.predictedRange,
+				selfTao,
+				allyTao,
+			})
+		);
+	}
+
+	return writeCache({
+		ok: true,
+		economy,
+		zhugeEquipped: !!z.equipped,
+		predictedRange: r.predictedRange,
+		selfTao,
+		allyTao,
+	});
+}
+
+/**
+ * 判断是否存在“杀盟友开路 -> 杀下家敌人”的爆发线（非常激进）。
+ *
+ * 口径（轻量启发式）：
+ * - 你的下家为“盟友”（att>0.6），其下家为“敌人”（att<-0.6）
+ * - 你当前无法对该敌人出【杀】（大概率因距离），且预计“打掉盟友后距离降低 1”即可出杀
+ * - 你具备多次出【杀】能力（诸葛连弩/无限杀/额外杀），且手里【杀】数量足够覆盖“击杀盟友 + 击杀敌人”
+ *
+ * @param {*} player
+ * @param {*} shaCard
+ * @param {*} game
+ * @param {*} get
+ * @returns {{
+ *  ok:boolean,
+ *  ally:any|null,
+ *  enemy:any|null,
+ *  shaCount:number,
+ *  needSha:number,
+ *  zhugeEquipped:boolean,
+ * }}
+ */
+function getFriendlyFireOpenPathContext(player, shaCard, game, get) {
+	const empty = { ok: false, ally: null, enemy: null, shaCount: 0, needSha: 0, zhugeEquipped: false };
+	if (!player || !shaCard || !game) return empty;
+	if (String(shaCard?.name || shaCard?.viewAs || "") !== "sha") return empty;
+
+	const ally = getNextAlivePlayer(player, game);
+	if (!ally || ally === player) return empty;
+
+	// 保守：身份局不考虑“杀主公开路”（太离谱）；其他模式交给态度/局势约束
+	if (get?.mode?.() === "identity") {
+		const zhu = game?.zhu;
+		if (zhu && ally === zhu) return empty;
+	}
+
+	const enemy = getNextAlivePlayer(ally, game);
+	if (!enemy || enemy === player || enemy === ally) return empty;
+
+	const attAlly = safeAttitude(get, player, ally);
+	const attEnemy = safeAttitude(get, player, enemy);
+	if (!(attAlly > 0.6 && attEnemy < -0.6)) return empty;
+
+	// 仅处理“盟友把敌人隔开”的典型座次：player->ally->enemy
+	if (getTurnOrderDistance(player, ally, game) !== 1) return empty;
+	if (getTurnOrderDistance(player, enemy, game) !== 2) return empty;
+
+	// 已能直接打到敌人则不需要开路
+	let canHitEnemyNow = false;
+	try {
+		if (typeof player.canUse === "function") canHitEnemyNow = !!player.canUse(shaCard, enemy);
+	} catch (e) {
+		canHitEnemyNow = false;
+	}
+	if (canHitEnemyNow) return empty;
+
+	// 预计“杀掉盟友后距离-1即可够到”：当前距离应当只差 1
+	let attackRange = 1;
+	try {
+		if (typeof player.getAttackRange === "function") {
+			const v = player.getAttackRange();
+			if (typeof v === "number" && Number.isFinite(v)) attackRange = v;
+		}
+	} catch (e) {
+		attackRange = 1;
+	}
+	const distNow = safeDistance(get, player, enemy);
+	if (!Number.isFinite(distNow) || distNow <= 0) return empty;
+	if (!(distNow > attackRange + 0.001)) return empty;
+	if (!(distNow <= attackRange + 1.05)) return empty;
+
+	// 多杀能力：诸葛连弩 / 无限杀 / 额外杀
+	const weapon = safeGetWeaponCard(player, get);
+	const zhugeEquipped = !!weapon && String(weapon?.name || "") === "zhuge";
+	const shaUnlimited = safeHasSkillTag(player, TAG_SHA_UNLIMITED);
+	const shaExtra = safeHasSkillTag(player, TAG_SHA_EXTRA);
+	const hasUnlimited = zhugeEquipped || shaUnlimited;
+	const hasAtLeastTwo = hasUnlimited || shaExtra;
+	if (!hasAtLeastTwo) return Object.assign({}, empty, { ally, enemy, zhugeEquipped });
+
+	// 若已用过杀且没有“无限杀”，则很难再完成“击杀盟友+击杀敌人”的两段线
+	const cardHist = safeGetPhaseUseCardHistory(player);
+	const usedSha = cardHist.some(ev => String(ev?.card?.name || ev?.cards?.[0]?.name || "") === "sha");
+	if (usedSha && !hasUnlimited) {
+		return Object.assign({}, empty, { ally, enemy, zhugeEquipped });
+	}
+
+	// 杀够多：至少覆盖“击杀盟友 + 击杀敌人”
+	const allyHp = typeof ally.hp === "number" && !Number.isNaN(ally.hp) ? Math.max(0, ally.hp) : 0;
+	const enemyHp = typeof enemy.hp === "number" && !Number.isNaN(enemy.hp) ? Math.max(0, enemy.hp) : 0;
+	const needSha = Math.max(2, allyHp + Math.max(1, enemyHp));
+	const shaCount = safeCountCardsByName(player, "h", "sha");
+
+	// 若仅“额外杀”而没有“无限杀/连弩”，则最多只假设可再多出 1 次杀：仅支持 needSha==2 的极小场景
+	if (!hasUnlimited && shaExtra && needSha > 2) return { ok: false, ally, enemy, shaCount, needSha, zhugeEquipped };
+	if (!(shaCount >= needSha)) return { ok: false, ally, enemy, shaCount, needSha, zhugeEquipped };
+
+	// 若当前仍有其他可打到的敌人，则不建议先杀盟友开路（除非后续再加更细策略）
+	for (const p of game.players || []) {
+		if (!p || p === player || p === ally || p === enemy) continue;
+		try {
+			if (typeof p.isDead === "function" && p.isDead()) continue;
+		} catch (e) {
+			// ignore
+		}
+		if (safeAttitude(get, player, p) >= -0.6) continue;
+		try {
+			if (typeof player.canUse === "function" && player.canUse(shaCard, p)) {
+				return { ok: false, ally, enemy, shaCount, needSha, zhugeEquipped };
+			}
+		} catch (e) {
+			// ignore
+		}
+	}
+
+	return { ok: true, ally, enemy, shaCount, needSha, zhugeEquipped };
+}
+
+/**
  * 判断一次 chooseTarget 事件是否属于“救援/回复”语义（用于“刚刚攻击的人我不救”门禁）。
  *
  * @param {*} event
@@ -672,6 +1411,94 @@ function isRescueLikeChooseTargetEvent(event, player, get) {
 	const promptText = safeGetSkillPromptText(skill, info, event, player, get);
 	const text = String(promptText || "");
 	return text.includes("回复") || text.includes("救");
+}
+
+/**
+ * 判断一次 chooseBool（通常来自 chooseUseTarget 的“是否使用”询问）是否需要触发
+ * 「刚刚被我攻击的人我不救」硬门禁。
+ *
+ * 说明：
+ * - 典型场景：濒死阶段使用【桃】（【桃】常见为 `selectTarget:-1`，引擎会走 chooseBool 分支）
+ * - 仅在存在 chooseUseTarget 父事件时才生效，避免误伤其他“是否”确认
+ *
+ * @param {*} chooseBoolEvent
+ * @param {*} player
+ * @param {*} game
+ * @param {*} get
+ * @returns {boolean}
+ */
+export function shouldForbidRescueRecentAttackInChooseBool(chooseBoolEvent, player, game, get) {
+	if (!chooseBoolEvent || !player || !game) return false;
+
+	const recent = player?.storage?.[STORAGE_KEY]?.runtime?.recentAttack;
+	if (!recent || !recent.targetPid) return false;
+
+	// 仅 gate chooseUseTarget -> chooseBool 的救援询问（典型：濒死用桃）
+	let useEvt = null;
+	try {
+		useEvt = typeof chooseBoolEvent.getParent === "function" ? chooseBoolEvent.getParent("chooseUseTarget") : null;
+	} catch (e) {
+		useEvt = null;
+	}
+	if (!useEvt) return false;
+
+	// 只对“救援/回复”语义生效
+	if (!isRescueLikeChooseTargetEvent(useEvt, player, get)) return false;
+
+	// 在 chooseUseTarget 中，目标可能写入 targets2（筛选后的候选）或 targets（默认全体）
+	const candidates =
+		Array.isArray(useEvt.targets2) && useEvt.targets2.length ? useEvt.targets2 : Array.isArray(useEvt.targets) ? useEvt.targets : [];
+	if (!candidates.length) return false;
+
+	for (const t of candidates) {
+		if (!t) continue;
+		if (getPid(t) === recent.targetPid) return true;
+	}
+	return false;
+}
+
+/**
+ * 判断一次 chooseBool（通常来自 chooseUseTarget 的“是否使用”询问）是否需要触发
+ * 「主公首轮全暗：群攻可直接使用」偏置。
+ *
+ * 说明：
+ * - 典型场景：【南蛮入侵】/【万箭齐发】等 selectTarget:-1 的群攻牌在 chooseUseTarget 中会走 chooseBool 分支
+ * - 该偏置只在“主公首轮且全场无人暴露身份（全暗）”时生效：用于试探信息，不按纯收益计算
+ *
+ * @param {*} chooseBoolEvent
+ * @param {*} player
+ * @param {*} game
+ * @param {*} get
+ * @returns {boolean}
+ */
+export function shouldForceZhuRound1AoeProbeInChooseBool(chooseBoolEvent, player, game, get) {
+	if (!chooseBoolEvent || !player || !game) return false;
+	if (get?.mode?.() !== "identity") return false;
+	if (!isZhuRoundOneAllHidden(player, game)) return false;
+
+	let useEvt = null;
+	try {
+		useEvt = typeof chooseBoolEvent.getParent === "function" ? chooseBoolEvent.getParent("chooseUseTarget") : null;
+	} catch (e) {
+		useEvt = null;
+	}
+	if (!useEvt) return false;
+
+	// 仅对“主动出牌阶段”的是否使用确认生效
+	if (!isPhaseUseContext(useEvt) && !isPhaseUseContext(chooseBoolEvent)) return false;
+
+	const card = findEventCard(useEvt) || findEventCard(chooseBoolEvent);
+	if (!card) return false;
+
+	const isAoeDamage =
+		safeGetCardAiTag(card, "damage", get) &&
+		safeGetCardAiTag(card, "multitarget", get) &&
+		safeGetCardAiTag(card, "multineg", get);
+	if (isAoeDamage) return true;
+
+	// 兜底：少量情况下 tag 解析失败时回退牌名
+	const name = String(card?.name || card?.viewAs || "");
+	return name === "nanman" || name === "wanjian";
 }
 
 /**
@@ -833,6 +1660,32 @@ function getTurnOrderDistance(from, to, game) {
 }
 
 /**
+ * 取得某角色的“顺时针下家”（下一名存活玩家）。
+ *
+ * @param {*} from
+ * @param {*} game
+ * @returns {*|null}
+ */
+function getNextAlivePlayer(from, game) {
+	if (!from || !game) return null;
+	const players = Array.isArray(game.players) ? game.players : [];
+	const alive = players.filter(p => {
+		if (!p) return false;
+		try {
+			if (typeof p.isDead === "function" && p.isDead()) return false;
+		} catch (e) {
+			// ignore
+		}
+		return true;
+	});
+	const n = alive.length;
+	if (n <= 1) return null;
+	const idx = alive.indexOf(from);
+	if (idx < 0) return null;
+	return alive[(idx + 1) % n] || null;
+}
+
+/**
  * 判断目标在“本轮（以 phaseNumber 近似）”是否还未行动。
  *
  * 解释：当某玩家回合开始时，其 phaseNumber 会 +1；因此在当前玩家的回合内，若目标的 phaseNumber
@@ -847,6 +1700,39 @@ function hasNotActedYetThisRound(actor, target) {
 	const t = safeGetPhaseNumber(target);
 	if (a === null || t === null) return false;
 	return t < a;
+}
+
+/**
+ * 判断是否为“主公首轮且全场无人暴露身份（全暗）”的局面。
+ *
+ * 说明：
+ * - 该判定用于约束主公首轮在信息不足时的“盲目乱打”。
+ * - “暴露”口径：`identityShown===true` 或 `ai.shown>0`（软暴露）。
+ *
+ * @param {*} player
+ * @param {*} game
+ * @returns {boolean}
+ */
+function isZhuRoundOneAllHidden(player, game) {
+	if (!player || !game) return false;
+	const id = String(player.identity || "");
+	if (id !== "zhu" && !player.isZhu) return false;
+	const round = typeof game?.roundNumber === "number" && !Number.isNaN(game.roundNumber) ? game.roundNumber : 0;
+	if (round !== 1) return false;
+
+	const players = Array.isArray(game.players) ? game.players : [];
+	for (const p of players) {
+		if (!p || p === player) continue;
+		try {
+			if (typeof p.isIn === "function" && !p.isIn()) continue;
+		} catch (e) {
+			// ignore
+		}
+		if (p.identityShown) return false;
+		const shown = p.ai && typeof p.ai.shown === "number" && !Number.isNaN(p.ai.shown) ? p.ai.shown : 0;
+		if (shown > 0) return false;
+	}
+	return true;
 }
 
 /**
@@ -1593,6 +2479,43 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 		);
 	}
 
+	// 身份局策略：主公首轮全场全暗时避免盲目乱打；若可存牌则优先保留进攻牌（群攻可另行试探）
+	if (!game.__slqjAiPersona._zhuRound1AllHiddenAvoidBlindAggroHookInstalled) {
+		game.__slqjAiPersona._zhuRound1AllHiddenAvoidBlindAggroHookInstalled = true;
+		hooks.on(
+			"slqj_ai_score",
+			ctx => {
+				if (!ctx || ctx.kind !== "chooseTarget" || ctx.stage !== "final") return;
+				if (get?.mode?.() !== "identity") return;
+				if (typeof get?.itemtype === "function" && get.itemtype(ctx.candidate) !== "player") return;
+
+				const player = ctx.player;
+				const target = ctx.candidate;
+				if (!player || !target || target === player) return;
+
+				if (!isZhuRoundOneAllHidden(player, game)) return;
+
+				// 可存牌（不溢出）时才压制盲打；若本就要弃牌则放开（用牌比弃牌更不亏）
+				let overflow = 0;
+				try {
+					overflow = typeof player.needsToDiscard === "function" ? player.needsToDiscard() : 0;
+				} catch (e) {
+					overflow = 0;
+				}
+				if (overflow > 0) return;
+
+				// 仅限制“主动出牌阶段”的有害选目标，避免影响响应/被动场景
+				if (!isPhaseUseContext(ctx.event)) return;
+
+				const tv = getTargetUseValueFromEvent(player, target, ctx.event, get);
+				if (typeof tv !== "number" || Number.isNaN(tv) || tv >= 0) return;
+
+				ctx.score -= 9999;
+			},
+			{ priority: 2 }
+		);
+	}
+
 	// 扩展技巧：手牌未到上限且无进攻需求时，武器/减马尽量暗藏手里（避免“无收益明牌”与被借刀等风险）
 	if (!game.__slqjAiPersona._equipHoldInHandHookInstalled) {
 		game.__slqjAiPersona._equipHoldInHandHookInstalled = true;
@@ -2216,6 +3139,258 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 		);
 	}
 
+	// 行为规则：连弩起爆前，压制提前出杀（让“卖血拿牌”先完成梭哈再爆发输出）。
+	// - 条件：本次 chooseCard 候选集中存在满足“连弩起爆梭哈”条件的主动卖血技能，且尚未出过杀
+	// - 行为：对【杀】做轻度降权（不推翻明显击杀等极高收益）
+	if (!game.__slqjAiPersona._activeMaixieZhugeAllInDelayShaHookInstalled) {
+		game.__slqjAiPersona._activeMaixieZhugeAllInDelayShaHookInstalled = true;
+		hooks.on(
+			"slqj_ai_score",
+			ctx => {
+				if (!ctx || ctx.stage !== "final") return;
+				if (ctx.kind !== "chooseCard") return;
+				if (typeof get?.itemtype === "function" && get.itemtype(ctx.candidate) !== "card") return;
+
+				const player = ctx.player;
+				const card = ctx.candidate;
+				if (!player || !card) return;
+				if (!isPhaseUseContext(ctx.event)) return;
+
+				const name = String(card?.name || "");
+				if (name !== "sha") return;
+
+				// 已进入“爆发输出”阶段则不再延后出杀
+				const cardHist = safeGetPhaseUseCardHistory(player);
+				if (cardHist.some(ev => String(ev?.card?.name || ev?.cards?.[0]?.name || "") === "sha")) return;
+
+				const all = ctx.all;
+				if (!Array.isArray(all) || !all.length) return;
+
+				let hasAllInSkill = false;
+				for (const cand of all) {
+					if (typeof cand !== "string" || !cand) continue;
+					const info = safeGetSkillInfo(cand, get);
+					const aiInfo = info?.ai;
+					if (!aiInfo || typeof aiInfo !== "object") continue;
+					if (!aiInfo[TAG_ACTIVE_MAIXIE]) continue;
+					const c = getActiveMaixieZhugeAllInContext(player, cand, info, ctx.event, game, get);
+					if (c.ok) {
+						hasAllInSkill = true;
+						break;
+					}
+				}
+				if (!hasAllInSkill) return;
+
+				// 明显高收益（击杀/关键破局）不干预
+				const base = typeof ctx.base === "number" && !Number.isNaN(ctx.base) ? ctx.base : 0;
+				if (base >= 6.8) return;
+
+				ctx.score -= 2.4;
+			},
+			{ priority: 5 }
+		);
+	}
+
+	// 行为规则：连弩起爆——主动卖血拿牌可“梭哈”。
+	// - 条件：主动卖血技能满足“一血换二牌”及以上；有诸葛连弩且不卡距离；自己或友方有桃兜底
+	// - 行为：在出牌阶段（未开始出杀）强力提高该卖血技能的优先级，倾向先把牌“狂拿”到位，再靠连弩猛出杀
+	if (!game.__slqjAiPersona._activeMaixieZhugeAllInHookInstalled) {
+		game.__slqjAiPersona._activeMaixieZhugeAllInHookInstalled = true;
+		hooks.on(
+			"slqj_ai_score",
+			ctx => {
+				if (!ctx || ctx.stage !== "final") return;
+				if (ctx.kind !== "chooseCard" && ctx.kind !== "chooseButton") return;
+				const player = ctx.player;
+				if (!player) return;
+				if (!isPhaseUseContext(ctx.event)) return;
+
+				let skill = "";
+				if (ctx.kind === "chooseCard") {
+					const candidate = ctx.candidate;
+					if (typeof candidate !== "string" || !candidate) return;
+					skill = candidate;
+				} else {
+					const link = ctx.candidate?.link;
+					if (typeof link !== "string" || !link) return;
+					skill = link;
+				}
+
+				const info = safeGetSkillInfo(skill, get);
+				const aiInfo = info?.ai;
+				if (!aiInfo || typeof aiInfo !== "object") return;
+				if (!aiInfo[TAG_ACTIVE_MAIXIE]) return;
+
+				// 一旦已经开始出杀（进入“爆发输出”阶段），不再强推继续卖血（避免来回摇摆）
+				const cardHist = safeGetPhaseUseCardHistory(player);
+				if (cardHist.some(ev => String(ev?.card?.name || ev?.cards?.[0]?.name || "") === "sha")) return;
+
+				const c = getActiveMaixieZhugeAllInContext(player, skill, info, ctx.event, game, get);
+				if (!c.ok) return;
+
+				// 一血换二牌≈小赚；越高越赚 -> 加分更大
+				const ratio = clampNumber(c.economy.cardsPerHp, 0, 6);
+				const profit = clampNumber((ratio - 2) / 2, 0, 1.5);
+				let bonus = 4.2 + 3.2 * profit;
+				if (c.allyTao > 0) bonus += 0.45;
+				if (c.zhugeEquipped) bonus += 0.25;
+
+				// 更激进：当“本次卖血可能直接卖到濒死”且存在救援兜底时，强推继续梭哈。
+				// - 若依赖盟友桃（allyTao>0），更敢卖到濒死
+				// - 若仅自带桃（selfTao>0），也允许但略保守（避免无意义消耗自保资源）
+				const hp = typeof player.hp === "number" && !Number.isNaN(player.hp) ? player.hp : 0;
+				const hpCost = typeof c.economy.hpCost === "number" && Number.isFinite(c.economy.hpCost) ? c.economy.hpCost : 1;
+				const afterHp = hp - Math.max(1, hpCost);
+				const willDying = afterHp <= 0;
+				if (willDying) {
+					bonus += c.allyTao > 0 ? 10.5 : 6.5;
+				} else if (afterHp <= 1) {
+					bonus += c.allyTao > 0 ? 4.2 : 2.4;
+				} else if (afterHp <= 2) {
+					bonus += c.allyTao > 0 ? 2.0 : 1.2;
+				}
+
+				ctx.score += bonus;
+			},
+			{ priority: 6 }
+		);
+	}
+
+	// 行为规则：主动卖血在低血线时禁用（除非手里有桃）。
+	// - 条件：hp < ceil(maxHp/2)，且候选为“主动卖血”技能（slqj_ai_active_maixie）
+	// - 例外：手牌区存在【桃】时允许使用（自保兜底）
+	// - 例外：满足“连弩起爆梭哈”条件时允许继续主动卖血拿牌（见 getActiveMaixieZhugeAllInContext）
+	if (!game.__slqjAiPersona._activeMaixieLowHpGuardHookInstalled) {
+		game.__slqjAiPersona._activeMaixieLowHpGuardHookInstalled = true;
+		hooks.on(
+			"slqj_ai_score",
+			ctx => {
+				if (!ctx || ctx.stage !== "final") return;
+				if (ctx.kind !== "chooseCard" && ctx.kind !== "chooseButton") return;
+				const player = ctx.player;
+				if (!player) return;
+				if (!isPhaseUseContext(ctx.event)) return;
+
+				let skill = "";
+				if (ctx.kind === "chooseCard") {
+					const candidate = ctx.candidate;
+					if (typeof candidate !== "string" || !candidate) return;
+					skill = candidate;
+				} else {
+					const link = ctx.candidate?.link;
+					if (typeof link !== "string" || !link) return;
+					skill = link;
+				}
+
+				const info = safeGetSkillInfo(skill, get);
+				const aiInfo = info?.ai;
+				if (!aiInfo || typeof aiInfo !== "object") return;
+				if (!aiInfo[TAG_ACTIVE_MAIXIE]) return;
+
+				// 若满足“连弩起爆梭哈”条件，则低血线不再强行禁用（让它敢卖）
+				const allIn = getActiveMaixieZhugeAllInContext(player, skill, info, ctx.event, game, get);
+				if (allIn.ok) return;
+
+				const hp = typeof player.hp === "number" && !Number.isNaN(player.hp) ? player.hp : 0;
+				const maxHpRaw =
+					typeof player.maxHp === "number" && !Number.isNaN(player.maxHp) ? player.maxHp : hp;
+				const maxHp = Math.max(0, maxHpRaw);
+				const halfCeil = Math.ceil(maxHp / 2);
+				if (!(hp < halfCeil)) return;
+
+				const taoCount = safeCountCardsByName(player, "h", "tao");
+				if (taoCount > 0) return;
+
+				ctx.score -= 9999;
+			},
+			{ priority: 7 }
+		);
+	}
+
+	// 行为规则：开路斩友（极激进）。
+	// - 场景：敌人被盟友隔开（下家=盟友，其下家=敌人），当前因距离打不到敌人
+	// - 条件：具备多次出杀能力，且手里杀足够覆盖“击杀盟友 + 击杀敌人”
+	// - 行为：允许先对盟友出杀以“开路”，再转火下家敌人
+	if (!game.__slqjAiPersona._friendlyFireOpenPathHookInstalled) {
+		game.__slqjAiPersona._friendlyFireOpenPathHookInstalled = true;
+
+		// 1) 选牌：若存在开路线，则轻度抬高【杀】的出牌倾向（否则可能永远不会进入选目标阶段）。
+		hooks.on(
+			"slqj_ai_score",
+			ctx => {
+				if (!ctx || ctx.kind !== "chooseCard" || ctx.stage !== "final") return;
+				if (typeof get?.itemtype === "function" && get.itemtype(ctx.candidate) !== "card") return;
+				const player = ctx.player;
+				const card = ctx.candidate;
+				if (!player || !card) return;
+				if (!isPhaseUseContext(ctx.event)) return;
+				if (String(card?.name || card?.viewAs || "") !== "sha") return;
+
+				const c = getFriendlyFireOpenPathContext(player, card, game, get);
+				if (!c.ok) return;
+
+				// 顺风时不乱斩友；除非目标是主公（击杀即终局）
+				const s = getSituationIndex(player, game, get);
+				const zhu = game?.zhu;
+				const enemyIsZhu = !!zhu && c.enemy === zhu;
+				if (s > 0.22 && !enemyIsZhu) return;
+
+				const intensity = clampNumber(Math.max(0, -s), 0, 1);
+				const threaten = safeGetThreaten(get, c.enemy, player);
+				const threatFactor = clampNumber((threaten - 0.9) / 1.4, 0, 1);
+				const slack = c.shaCount - c.needSha;
+				const slackFactor = clampNumber(slack / 3, 0, 1);
+
+				let bonus = 2.2 + 2.4 * intensity + 1.2 * threatFactor + 0.9 * slackFactor;
+				if (enemyIsZhu) bonus += 2.4;
+				if (c.zhugeEquipped) bonus += 0.35;
+				ctx.score += bonus;
+			},
+			{ priority: 8 }
+		);
+
+		// 2) 选目标：对“开路盟友”加分，使其在【杀】的选目标中可被选中。
+		hooks.on(
+			"slqj_ai_score",
+			ctx => {
+				if (!ctx || ctx.kind !== "chooseTarget" || ctx.stage !== "final") return;
+				if (typeof get?.itemtype === "function" && get.itemtype(ctx.candidate) !== "player") return;
+				const player = ctx.player;
+				const target = ctx.candidate;
+				if (!player || !target || target === player) return;
+				if (!isPhaseUseContext(ctx.event)) return;
+
+				const card = findEventCard(ctx.event);
+				if (!card || String(card?.name || card?.viewAs || "") !== "sha") return;
+
+				const c = getFriendlyFireOpenPathContext(player, card, game, get);
+				if (!c.ok) return;
+				if (target !== c.ally) return;
+
+				// 顺风时不乱斩友；除非目标是主公（击杀即终局）
+				const s = getSituationIndex(player, game, get);
+				const zhu = game?.zhu;
+				const enemyIsZhu = !!zhu && c.enemy === zhu;
+				if (s > 0.22 && !enemyIsZhu) return;
+
+				const intensity = clampNumber(Math.max(0, -s), 0, 1);
+				const threaten = safeGetThreaten(get, c.enemy, player);
+				const threatFactor = clampNumber((threaten - 0.9) / 1.4, 0, 1);
+				const slack = c.shaCount - c.needSha;
+				const slackBonus = clampNumber(slack * 0.65, 0, 4.0);
+
+				const enemyHp = typeof c.enemy?.hp === "number" && !Number.isNaN(c.enemy.hp) ? c.enemy.hp : 0;
+				const enemyLowHpBonus = enemyHp <= 1 ? 1.8 : enemyHp <= 2 ? 0.9 : 0;
+
+				let bonus = 12.5 + 8.2 * intensity + 3.0 * threatFactor + slackBonus + enemyLowHpBonus;
+				if (enemyIsZhu) bonus += 8.8;
+				if (c.zhugeEquipped) bonus += 1.2;
+				ctx.score += bonus;
+			},
+			{ priority: 8 }
+		);
+	}
+
 	// 通用技巧：锦囊牌通用技巧 —— 越关键的锦囊越后用（保守实现：仅做顺序偏好，不强制改动最优解）
 	// - 延时锦囊最后贴：出牌阶段前段，若仍存在其他可用动作，则对延时锦囊轻度降权
 	// - 拆顺优先于伤害动作：同回合存在拆顺与伤害动作时，轻度偏向先拆顺
@@ -2835,18 +4010,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 							const att = safeAttitude(get, player, p);
 							if (att > -0.6) continue;
 							if (isLinked(p)) continue;
-							if (typeof p?.hasSkillTag === "function") {
-								let maixie = false;
-								try {
-									maixie =
-										!!p.hasSkillTag("maixie") ||
-										!!p.hasSkillTag("maixie_defend") ||
-										!!p.hasSkillTag("maixie_hp");
-								} catch (e) {
-									maixie = false;
-								}
-								if (maixie) continue;
-							}
+							if (isMaixieLikeTarget(p)) continue;
 							hasChainOpportunity = true;
 							break;
 						}
@@ -3044,46 +4208,45 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 
 					const card = findEventCard(ctx.event);
 					const cardName = String(card?.name || "");
-					const tv = getResultNumberForTarget(card, ctx.event?.skill, player, target, get);
+					const tv = getTargetUseValueFromEvent(player, target, ctx.event, get);
 
-					// 顺风：不去打敌方卖血将（避免把优势打成“对面刷牌/刷收益”）
-					if (ahead && tv < 0 && typeof target?.hasSkillTag === "function") {
-						let maixie = false;
-						try {
-							maixie =
-								!!target.hasSkillTag("maixie") ||
-								!!target.hasSkillTag("maixie_defend") ||
-								!!target.hasSkillTag("maixie_hp");
-						} catch (e) {
-							maixie = false;
+					const att = safeAttitude(get, player, target);
+					const friendlyLike = target === player || att > 0.6;
+					const enemyLike = att < -0.6;
+
+					// 卖血门禁：进攻前评估“对方受伤后能赚多少收益”，据此决定是否值得喂卖血。
+					if (tv < 0 && enemyLike && isDamageLikeChooseTargetEvent(ctx.event, get)) {
+						const mx = estimateMaixieRewardOnDamaged(target, ctx.event, get);
+						if (mx.isMaixie && mx.reward > 0) {
+							const hp = typeof target.hp === "number" && !Number.isNaN(target.hp) ? target.hp : 0;
+							const lowHpScale = hp <= 1 ? 0.6 : hp <= 2 ? 0.8 : 1;
+
+							// tv 越“有害”（对目标越痛），越值得承受一定卖血收益，因此轻度减弱惩罚
+							const harm = clampNumber(-tv, 0, 6);
+							const harmScale = clampNumber(1.1 - harm * 0.08, 0.6, 1.1);
+
+							// 顺风更谨慎，逆风仍保留轻度门禁（但不强行“弃攻”）
+							const situationScale = ahead
+								? 0.9 + 0.7 * intensity
+								: behind
+									? 0.35 + 0.35 * intensity
+									: 0.65 + 0.5 * intensity;
+
+							const penalty = mx.reward * situationScale * lowHpScale * harmScale * modeScale;
+							ctx.score -= penalty;
 						}
-						if (maixie) ctx.score -= (1.5 + 2.2 * intensity) * modeScale;
 					}
 
 					// 顺风：优先“解铁索”而不是“乱连铁索”（尤其避免把自己/友方从未连变为已连）
 					// 逆风：更容忍连锁（求变），但仍尽量避免把敌方卖血将作为铁索起点
 					if (cardName === "tiesuo") {
 						const linked = isLinked(target);
-						const att = safeAttitude(get, player, target);
-						const friendlyLike = target === player || att > 0.6;
-						const enemyLike = att < -0.6;
 
 						// 敌方卖血将：尽量不“新连上”（解锁则更好）
-						if (enemyLike && typeof target?.hasSkillTag === "function") {
-							let maixie = false;
-							try {
-								maixie =
-									!!target.hasSkillTag("maixie") ||
-									!!target.hasSkillTag("maixie_defend") ||
-									!!target.hasSkillTag("maixie_hp");
-							} catch (e) {
-								maixie = false;
-							}
-							if (maixie) {
-								// 已连：顺手解锁；未连：减少把其作为铁索起点的冲动（顺风时已有通用卖血门禁，这里更轻）
-								if (linked) ctx.score += 0.35 * intensity;
-								else if (!ahead) ctx.score -= 0.55 * (0.4 + 0.6 * intensity);
-							}
+						if (enemyLike && isMaixieLikeTarget(target)) {
+							// 已连：顺手解锁；未连：减少把其作为铁索起点的冲动（顺风时已有通用卖血门禁，这里更轻）
+							if (linked) ctx.score += 0.35 * intensity;
+							else if (!ahead) ctx.score -= 0.55 * (0.4 + 0.6 * intensity);
 						}
 
 						// 顺风：友方/自己已连 -> 加分（倾向解锁）；未连 -> 扣分（避免制造隐患）
