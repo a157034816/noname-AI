@@ -1377,16 +1377,29 @@ function getFriendlyFireOpenPathContext(player, shaCard, game, get) {
 /**
  * 判断一次 chooseTarget 事件是否属于“救援/回复”语义（用于“刚刚攻击的人我不救”门禁）。
  *
+ * 说明：
+ * - 濒死求救通常走 `chooseToUse`（`event.type==="dying"`），此时事件本身未必已写入 `event.card`
+ *   （牌面往往只体现在 `get.card()`），因此这里需要对 `type==="dying"` 做显式兜底。
+ *
  * @param {*} event
  * @param {*} player
  * @param {*} get
  * @returns {boolean}
  */
 function isRescueLikeChooseTargetEvent(event, player, get) {
+	// 濒死求救：一定属于“救援/回复”语义（即便事件尚未写入 event.card）
+	if (String(event?.type || "") === "dying" || !!event?.dying) return true;
+
 	const card = findEventCard(event);
-	if (card) {
-		if (isTaoCard(card)) return true;
-		if (safeGetCardAiTag(card, "save", get) || safeGetCardAiTag(card, "recover", get)) return true;
+	const selected = !card && typeof get?.card === "function" ? get.card() : null;
+	const currentCard = card || selected;
+	if (currentCard) {
+		if (isTaoCard(currentCard)) return true;
+		if (
+			safeGetCardAiTag(currentCard, "save", get) ||
+			safeGetCardAiTag(currentCard, "recover", get)
+		)
+			return true;
 	}
 
 	const skill = typeof event?.skill === "string" ? String(event.skill || "") : "";

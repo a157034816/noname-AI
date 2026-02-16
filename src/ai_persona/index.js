@@ -25,6 +25,7 @@ import {
   onRewriteDiscardResultRage,
   onRewriteGainResultRage,
 } from "./events/rage_events.js";
+import { installLoyalistProtectLordGuard } from "./loyalist_protect_lord_guard.js";
 import {
   onPhaseBeginStartTurnMemoryReset,
   onDamageEndTurnMemory,
@@ -242,6 +243,8 @@ export function installPersonaSystem({ lib, game, get, ai, _status, config }) {
 	installChooseCharacterBias({ game, lib, get, _status });
 
 	installDefaultScoreHooks({ game, get, _status });
+
+	installLoyalistProtectLordGuard({ lib, game, get, _status });
 
 	// 在 hooks 初始化完成后再安装补丁，方便补丁内部直接读取 hooks
 	installAttitudePatch({ get, game, _status });
