@@ -239,7 +239,7 @@ export function installPersonaSystem({ lib, game, get, ai, _status, config }) {
 	game.__slqjAiPersona.getPlayerCamp = getPlayerCamp;
 	game.__slqjAiPersona.getCampOutputCorePlayer = getCampOutputCorePlayer;
 
-	// 开局选将偏置（身份局）：反贼人数较多时更偏向群体型辅助等经验规则
+	// 开局选将影响（身份局）：反贼人数较多时更偏向群体型辅助等经验规则
 	installChooseCharacterBias({ game, lib, get, _status });
 
 	installDefaultScoreHooks({ game, get, _status });

@@ -66,7 +66,7 @@ function computePerceivedAttitude(from, to, game) {
 	att += evidence * (0.6 + traits.insight * 0.8);
 	att -= grudge * (0.25 + traits.revengeWeight * 0.2);
 
-	// 基础偏置：越激进越容易把“未知”当作潜在敌人
+	// 基础影响：越激进越容易把“未知”当作潜在敌人
 	att -= traits.aggressiveness * 0.25;
 
 	// 回合推进：前期更中立，后期更容易形成强态度

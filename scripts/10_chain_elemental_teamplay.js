@@ -9,7 +9,7 @@ return;
  */
 
 /**
- * scripts 插件元信息（用于“scripts 插件管理”UI 友好展示）。
+ * scripts 插件元信息（用于“脚本插件管理”UI 友好展示）。
  *
  * 约定：
  * - 插件管理 UI 只读取该对象，不会自动调用入口函数
@@ -47,7 +47,7 @@ const DEFAULT_CFG = {
 };
 
 /**
- * 调试：一键降低门槛的预设（仅放宽阈值/窗口，不绕过“必须有铁索或已连环”等硬门禁）。
+ * 调试：一键降低门槛的预设（仅放宽阈值/窗口，不绕过“必须有铁索或已连环”等硬门槛）。
  *
  * @type {Partial<typeof DEFAULT_CFG>}
  */
@@ -723,7 +723,7 @@ function installRuntimeApi(ctx) {
 			ok = false;
 		}
 
-		// 调试记录：若出现“完全不触发”，可通过 DebugGetLast() 看 filter 是否被门禁挡住
+		// 调试记录：若出现“完全不触发”，可通过 DebugGetLast() 看 filter 是否被门槛挡住
 		try {
 			const rt = getOrCreateRuntime(game);
 			const dbg = ensureRuntimeDebug(rt);

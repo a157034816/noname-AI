@@ -3,7 +3,7 @@
  *
  * 机制（可按需改概率）：
  * - 开局时随机抽取 AI 玩家的一半进入“概率判定池”（不含人类玩家）
- * - 进入判定池后：每个玩家独立 {启用概率}% 概率启用热门/强势武将偏置（否则完全不改动候选）
+ * - 进入判定池后：每个玩家独立 {启用概率}% 概率启用热门/强势武将影响（否则完全不改动候选）
  *
  * 说明：通过包装 `game.chooseCharacter()` 及捕获 `game.createEvent('chooseCharacter')`
  * 取得事件对象，进而包装 `event.ai(player, list, list2, back)` 来重排/替换候选列表；
@@ -14,7 +14,7 @@
 
 import { isLocalAIPlayer } from "../src/ai_persona/lib/utils.js";
 /**
- * scripts 插件元信息（用于“scripts 插件管理”UI 友好展示）。
+ * scripts 插件元信息（用于“脚本插件管理”UI 友好展示）。
  *
  * 约定：
  * - 插件管理 UI 只读取该对象，不会自动调用入口函数
@@ -23,7 +23,7 @@ import { isLocalAIPlayer } from "../src/ai_persona/lib/utils.js";
  * @type {{name:string, version:string, description:string}}
  */
 export const slqjAiScriptMeta = {
-	name: "热门武将候选偏置",
+	name: "热门武将候选影响",
 	version: "1.0.3",
 	description: "影响开局 AI 选将候选列表：让热门/强势武将更容易进入候选并被选择。",
 };
@@ -167,9 +167,9 @@ function patchChooseCharacterEvent(ev, env) {
 }
 
 /**
- * 热门武将偏置策略（仅本局生效）：
+ * 热门武将影响策略（仅本局生效）：
  * - 随机抽取 AI 玩家的一半进入“概率判定池”（不含人类玩家）
- * - 对于进入判定池的玩家：每个玩家独立 {启用概率}% 概率启用热门/强势武将偏置（否则完全不改动候选）
+ * - 对于进入判定池的玩家：每个玩家独立 {启用概率}% 概率启用热门/强势武将影响（否则完全不改动候选）
  *
  * @param {*} player
  * @param {{game:any,logger:any,_status:any}} env

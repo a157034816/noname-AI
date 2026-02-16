@@ -6,7 +6,7 @@ import { isLocalAIPlayer, ensureStorage, getPid } from "../src/ai_persona/lib/ut
  */
 
 /**
- * scripts 插件元信息（用于“scripts 插件管理”UI 友好展示）。
+ * scripts 插件元信息（用于“脚本插件管理”UI 友好展示）。
  *
  * @type {{name:string, version:string, description:string}}
  */

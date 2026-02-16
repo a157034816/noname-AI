@@ -54,7 +54,7 @@ export function ensureStorage(player) {
  * - 非自机玩家：沿用原口径（离线、非 connectMode、非 online）即视为“本地 AI”
  * - 自机玩家（game.me）：仅在托管（isAuto===true）时视为“本地 AI”（避免影响手操）
  *
- * 该函数主要用于“决策逻辑/脚本门禁”（例如 `slqj_ai_score`、scripts 插件等）。
+ * 该函数主要用于“决策逻辑/脚本门槛”（例如 `slqj_ai_score`、scripts 插件等）。
  *
  * @param {*} player
  * @param {*} game

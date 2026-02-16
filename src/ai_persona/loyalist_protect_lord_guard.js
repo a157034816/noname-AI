@@ -1,5 +1,5 @@
 /**
- * 忠臣护主门禁（本地 AI 专用）：
+ * 忠臣护主门槛（本地 AI 专用）：
  * - 禁止忠臣对主公使用负面控场牌（如【乐不思蜀】、【兵粮寸断】）
  * - 禁止忠臣对主公使用“单目标伤害牌”（如【杀】/【决斗】等）
  *
@@ -89,7 +89,7 @@ function isSingleTargetDamageCard(card, player, get) {
 }
 
 /**
- * 安装“忠臣护主门禁”：以全局技能的 mod.playerEnabled 拦截不合理目标。
+ * 安装“忠臣护主门槛”：以全局技能的 mod.playerEnabled 拦截不合理目标。
  *
  * @param {{lib:any, game:any, get:any, _status:any}} opts
  * @returns {void}

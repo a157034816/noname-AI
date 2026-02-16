@@ -13,7 +13,7 @@ const DEFAULT_SCRIPTS_DIR = `extension/${EXTENSION_NAME}/scripts`;
  * 读取并解析脚本插件注册表配置。
  *
  * 说明：
- * - 配置内容为 JSON 字符串（由“scripts 插件管理”保存）
+ * - 配置内容为 JSON 字符串（由“脚本插件管理”保存）
  * - 未设置或解析失败：回退默认值
  *
  * @param {import("./ai_persona/lib/jsdoc_types.js").SlqjAiExtensionConfig|any} config

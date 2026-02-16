@@ -315,7 +315,7 @@ function safeGetRageTowards(player, target) {
 }
 
 /**
- * 怒气偏置权重（按人格类型）。
+ * 怒气影响权重（按人格类型）。
  *
  * @param {string} personaId
  * @returns {{wT:number, wG:number}}
@@ -680,7 +680,7 @@ function isMaixieLikeTarget(target) {
 }
 
 /**
- * 判断一次 chooseTarget 决策是否“更像伤害/失去体力”语义（用于卖血收益门禁）。
+ * 判断一次 chooseTarget 决策是否“更像伤害/失去体力”语义（用于卖血收益门槛）。
  *
  * @param {*} event
  * @param {*} get
@@ -1375,7 +1375,7 @@ function getFriendlyFireOpenPathContext(player, shaCard, game, get) {
 }
 
 /**
- * 判断一次 chooseTarget 事件是否属于“救援/回复”语义（用于“刚刚攻击的人我不救”门禁）。
+ * 判断一次 chooseTarget 事件是否属于“救援/回复”语义（用于“刚刚攻击的人我不救”门槛）。
  *
  * 说明：
  * - 濒死求救通常走 `chooseToUse`（`event.type==="dying"`），此时事件本身未必已写入 `event.card`
@@ -1428,7 +1428,7 @@ function isRescueLikeChooseTargetEvent(event, player, get) {
 
 /**
  * 判断一次 chooseBool（通常来自 chooseUseTarget 的“是否使用”询问）是否需要触发
- * 「刚刚被我攻击的人我不救」硬门禁。
+ * 「刚刚被我攻击的人我不救」硬门槛。
  *
  * 说明：
  * - 典型场景：濒死阶段使用【桃】（【桃】常见为 `selectTarget:-1`，引擎会走 chooseBool 分支）
@@ -1472,11 +1472,11 @@ export function shouldForbidRescueRecentAttackInChooseBool(chooseBoolEvent, play
 
 /**
  * 判断一次 chooseBool（通常来自 chooseUseTarget 的“是否使用”询问）是否需要触发
- * 「主公首轮全暗：群攻可直接使用」偏置。
+ * 「主公首轮全暗：群攻可直接使用」影响。
  *
  * 说明：
  * - 典型场景：【南蛮入侵】/【万箭齐发】等 selectTarget:-1 的群攻牌在 chooseUseTarget 中会走 chooseBool 分支
- * - 该偏置只在“主公首轮且全场无人暴露身份（全暗）”时生效：用于试探信息，不按纯收益计算
+ * - 该影响只在“主公首轮且全场无人暴露身份（全暗）”时生效：用于试探信息，不按纯收益计算
  *
  * @param {*} chooseBoolEvent
  * @param {*} player
@@ -2235,7 +2235,7 @@ function getSituationIndex(player, game, get) {
 }
 
 /**
- * 安装扩展默认策略（通过 `slqj_ai_score` hook 对选择评分做保守约束/门禁）。
+ * 安装扩展默认策略（通过 `slqj_ai_score` hook 对选择评分做保守约束/门槛）。
  *
  * @param {{game:any, get:any, _status:any}} param0
  * @returns {void}
@@ -2440,7 +2440,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				const all = Array.isArray(ctx.all) ? ctx.all : [];
 				if (!all.some(p => p === zhu)) return;
 
-				// 仅在“本就会出杀”的候选上做偏置：base<=0 直接不干预，避免把无收益选择硬抬上来
+				// 仅在“本就会出杀”的候选上做影响：base<=0 直接不干预，避免把无收益选择硬抬上来
 				const base = typeof ctx.base === "number" && !Number.isNaN(ctx.base) ? ctx.base : 0;
 				if (!(base > 0)) return;
 
@@ -2452,7 +2452,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				// 对非主公目标做轻度惩罚，避免推翻“明显击杀/关键破局”等强收益
 				if (base < 6) ctx.score -= 1.8;
 			},
-			// priority 越小越晚执行：尽量在既有策略之后再做“首轮强目标”偏置
+			// priority 越小越晚执行：尽量在既有策略之后再做“首轮强目标”影响
 			{ priority: 2 }
 		);
 	}
@@ -2868,7 +2868,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 
 				const base = typeof ctx.base === "number" && !Number.isNaN(ctx.base) ? ctx.base : 0;
 				if (base <= 0) return;
-				// 高收益目标不做额外推断偏置，避免推翻明显最优解
+				// 高收益目标不做额外推断影响，避免推翻明显最优解
 				if (base >= 4.5) return;
 
 				const k = cardName === "lebu" ? 0.28 : cardName === "bingliang" ? 0.22 : 0.18;
@@ -2927,7 +2927,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 
 	// 情绪：怒气（全局 + 定向）
 	// - 仅出牌阶段生效，避免干扰响应/弃牌等场景
-	// - 仅对“已是正分的候选”轻推：不把强门禁压到负分的项抬成可选
+	// - 仅对“已是正分的候选”轻推：不把强门槛压到负分的项抬成可选
 	if (!game.__slqjAiPersona._rageBiasHookInstalled) {
 		game.__slqjAiPersona._rageBiasHookInstalled = true;
 
@@ -3534,7 +3534,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 					const progress = cardHist.length + skillHist.length;
 					const earlyFactor = clampNumber(1 - progress / 3, 0, 1);
 
-					// AOE：开局身份局倾向 + 万箭略优于南蛮（轻量偏置）
+					// AOE：开局身份局倾向 + 万箭略优于南蛮（轻量影响）
 					if (cardName === "nanman" || cardName === "wanjian") {
 						const mode = typeof get?.mode === "function" ? String(get.mode()) : "";
 						if (mode === "identity") {
@@ -3560,7 +3560,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 						return;
 					}
 
-					// 桃园/五谷：身份局的阵营倾向（轻量偏置；不推翻既有门禁）
+					// 桃园/五谷：身份局的阵营倾向（轻量影响；不推翻既有门槛）
 					if (cardName === "taoyuan" || cardName === "wugu") {
 						const mode = typeof get?.mode === "function" ? String(get.mode()) : "";
 						if (mode === "identity" && base < 3.2) {
@@ -3571,7 +3571,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 								if (id === "fan") ctx.score += 0.28 * scale;
 								else if (id === "zhu" || id === "zhong" || id === "mingzhong") ctx.score -= 0.18 * scale;
 							} else {
-								// 五谷：开局谁开五谷默认跳反（开局更明显；中后期仍由门禁/基础收益决定）
+								// 五谷：开局谁开五谷默认跳反（开局更明显；中后期仍由门槛/基础收益决定）
 								const round = typeof game?.roundNumber === "number" ? game.roundNumber : 0;
 								const roundScale = round > 0 && round <= 2 ? 1 : 0.45;
 								if (id === "fan") ctx.score += 0.55 * scale * roundScale;
@@ -3826,7 +3826,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 	}
 
 	// 通用技巧：锦囊牌通用技巧（同段落：铁索/拆顺/无中/无懈）
-	// 说明：依然以基础收益为主，只在“局势/阶段/目标状态”较明确时做轻量偏置。
+	// 说明：依然以基础收益为主，只在“局势/阶段/目标状态”较明确时做轻量影响。
 	if (!game.__slqjAiPersona._trickSpecificTipsHookInstalled) {
 		game.__slqjAiPersona._trickSpecificTipsHookInstalled = true;
 		hooks.on(
@@ -4158,7 +4158,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 		);
 	}
 
-	// 扩展策略：顺风求稳，逆风求变（跨模式通用；identity 下会叠加已有的更强门禁，因此此处默认更“轻”）
+	// 扩展策略：顺风求稳，逆风求变（跨模式通用；identity 下会叠加已有的更强门槛，因此此处默认更“轻”）
 	if (!game.__slqjAiPersona._situationTempoHookInstalled) {
 		game.__slqjAiPersona._situationTempoHookInstalled = true;
 		hooks.on(
@@ -4169,7 +4169,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				if (!player) return;
 
 				const s = getSituationIndex(player, game, get);
-				// identity 模式已有强门禁：这里降低权重避免过度叠加
+				// identity 模式已有强门槛：这里降低权重避免过度叠加
 				const mode = typeof get?.mode === "function" ? String(get.mode()) : "";
 				const modeScale = mode === "identity" ? 0.55 : 1;
 
@@ -4227,7 +4227,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 					const friendlyLike = target === player || att > 0.6;
 					const enemyLike = att < -0.6;
 
-					// 卖血门禁：进攻前评估“对方受伤后能赚多少收益”，据此决定是否值得喂卖血。
+					// 卖血门槛：进攻前评估“对方受伤后能赚多少收益”，据此决定是否值得喂卖血。
 					if (tv < 0 && enemyLike && isDamageLikeChooseTargetEvent(ctx.event, get)) {
 						const mx = estimateMaixieRewardOnDamaged(target, ctx.event, get);
 						if (mx.isMaixie && mx.reward > 0) {
@@ -4238,7 +4238,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 							const harm = clampNumber(-tv, 0, 6);
 							const harmScale = clampNumber(1.1 - harm * 0.08, 0.6, 1.1);
 
-							// 顺风更谨慎，逆风仍保留轻度门禁（但不强行“弃攻”）
+							// 顺风更谨慎，逆风仍保留轻度门槛（但不强行“弃攻”）
 							const situationScale = ahead
 								? 0.9 + 0.7 * intensity
 								: behind
@@ -4257,7 +4257,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 
 						// 敌方卖血将：尽量不“新连上”（解锁则更好）
 						if (enemyLike && isMaixieLikeTarget(target)) {
-							// 已连：顺手解锁；未连：减少把其作为铁索起点的冲动（顺风时已有通用卖血门禁，这里更轻）
+							// 已连：顺手解锁；未连：减少把其作为铁索起点的冲动（顺风时已有通用卖血门槛，这里更轻）
 							if (linked) ctx.score += 0.35 * intensity;
 							else if (!ahead) ctx.score -= 0.55 * (0.4 + 0.6 * intensity);
 						}
