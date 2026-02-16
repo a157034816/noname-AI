@@ -3,15 +3,15 @@
  */
 
 /**
- * scripts 插件元信息（用于“scripts 插件管理”UI 友好展示）。
+ * scripts 插件元信息（用于“脚本插件管理”UI 友好展示）。
  *
  * @type {{name:string, version:string, description:string}}
  */
 export const slqjAiScriptMeta = {
-	name: "界沮授武将红利（摸牌偏置诸葛连弩）",
+	name: "界沮授武将红利（摸牌影响诸葛连弩）",
 	version: "1.0.1",
 	description:
-		"仅当玩家使用界沮授（xin_jushou）时生效：从牌堆摸牌时以较高概率把诸葛连弩（zhuge）移到牌堆顶，从而“更容易摸到诸葛连弩”；若已持有诸葛连弩，则再次偏置的概率会大幅降低。",
+		"仅当玩家使用界沮授（xin_jushou）时生效：从牌堆摸牌时以较高概率把诸葛连弩（zhuge）移到牌堆顶，从而“更容易摸到诸葛连弩”；若已持有诸葛连弩，则再次影响的概率会大幅降低。",
 };
 
 const SKILL_NAME = "slqj_bonus_xin_jushou_zhuge_draw";
@@ -19,7 +19,7 @@ const DEFAULT_CHANCE = 0.75;
 const DEFAULT_HAS_CARD_CHANCE_FACTOR = 0.02;
 
 /**
- * scripts 插件入口：安装界沮授（xin_jushou）摸牌红利（偏置诸葛连弩）。
+ * scripts 插件入口：安装界沮授（xin_jushou）摸牌红利（影响诸葛连弩）。
  *
  * 说明：
  * - 使用引擎事件 `drawBegin` 注入：在真正摸牌前，将牌堆中的诸葛连弩移动到牌堆顶
@@ -171,7 +171,7 @@ function getOrCreateRuntime(game) {
 }
 
 /**
- * 计算本次摸牌偏置的实际触发概率。
+ * 计算本次摸牌影响的实际触发概率。
  *
  * - 未持有目标牌：`chance`
  * - 已持有目标牌：`chance * hasCardChanceFactor`（默认 0.02，即显著降低重复摸到的概率）

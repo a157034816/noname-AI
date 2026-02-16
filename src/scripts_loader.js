@@ -26,7 +26,7 @@ import { listExtensionScriptFiles, readScriptsRegistry, getScriptsLoadPlan } fro
  *
  * 约定：
  * - 默认按文件名排序依次加载 `scripts/*.js` / `scripts/*.mjs`
- * - 若配置了 `slqj_ai_scripts_registry`（由“scripts 插件管理”UI维护），则按其顺序加载并跳过被禁用的脚本
+ * - 若配置了 `slqj_ai_scripts_registry`（由“脚本插件管理”UI维护），则按其顺序加载并跳过被禁用的脚本
  * - 对每个模块：
  *   - 先执行 `import()`（允许模块仅靠副作用注册 hook）
  *   - 若导出 `default` / `setup` / `install` 且为函数，则会以 (ctx) 形式调用

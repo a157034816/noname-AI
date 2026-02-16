@@ -5,14 +5,14 @@
 
 1) 包装 `ai.basic.chooseCard/chooseTarget/chooseButton` 的 check 函数  
 2) 在 check 的评分链中引入 HookBus（`slqj_ai_score`）与内置策略（反全知/噪声/小心眼等）  
-3) 通过默认策略 hooks（大量启发式门禁/偏置）把行为更“像人”
+3) 通过默认策略 hooks（大量启发式门槛/影响）把行为更“像人”
 
 对应源码：
 
 - 选择器补丁：`src/ai_persona/selector_patch.js`
 - 默认策略 hooks：`src/ai_persona/strategies/default_score_hooks.js`
 - HookBus：`src/ai_persona/lib/hook_bus.js`
-- 身份局门禁工具：`src/ai_persona/lib/identity_utils.js`、`src/ai_persona/lib/card_utils.js`
+- 身份局门槛工具：`src/ai_persona/lib/identity_utils.js`、`src/ai_persona/lib/card_utils.js`
 
 ---
 
@@ -54,10 +54,10 @@
 - `event`：`_status.event`（当前引擎事件）
 - `base`：引擎原评分
 - `score`：当前可写的最终评分（hook 可改）
-- `extra`：扩展内置额外分（噪声/偏置等）
+- `extra`：扩展内置额外分（噪声/影响等）
 - `game` / `get`：便于 hook 使用引擎工具
 - `stop`：置为 `true` 可终止后续 handler
-- `skipBuiltin`：置为 `true` 可跳过扩展内置偏置（噪声/小心眼等）
+- `skipBuiltin`：置为 `true` 可跳过扩展内置影响（噪声/小心眼等）
 
 > handler 若返回非 `undefined`，会作为新的 ctx 继续向后传递（HookBus 的链式语义见 `hook_bus.js`）。
 
@@ -89,18 +89,18 @@
 - 加入对称小噪声：`(Math.random()-0.5) * traits.randomness * 0.2`
 - 并保证：不会把 0/负收益抬成正收益（base<=0 时噪声为 0）
 
-### 3.3 记仇偏置（petty）
+### 3.3 记仇影响（petty）
 若人格为 `petty`：
 
 - 读取 `memory.grudge[targetPid]`
-- 仅当目标本就偏敌对（`get.attitude(player,target) < 0`）时，追加偏置  
+- 仅当目标本就偏敌对（`get.attitude(player,target) < 0`）时，追加影响  
 `extra += clamp(grudge * 0.12, 0, 2)`
 
 ---
 
 ## 4) 默认策略 hooks（default_score_hooks）
 
-默认策略通过订阅 `slqj_ai_score` 在“评分层”实现大量经验规则与保守门禁。  
+默认策略通过订阅 `slqj_ai_score` 在“评分层”实现大量经验规则与保守门槛。  
 它不直接改动引擎 AI 函数；而是在 selector_patch 发出的评分链上做增减分。
 
 安装入口：`src/ai_persona/strategies/default_score_hooks.js -> installDefaultScoreHooks({game,get,_status})`  
@@ -193,7 +193,7 @@
 
 2) **响应**：温和“卖血保杀”  
    - 当 hp 不低且手里杀很稀缺时，对南蛮/决斗的响应“出杀”做轻度降权  
-   - 仅是温和偏置，不会推翻必防致命伤的情况
+   - 仅是温和影响，不会推翻必防致命伤的情况
 
 3) **出牌阶段**：酒的时机按本局 habit 分流  
    - `habits.jiuSearchSha=conservative`：手里没杀就不空喝酒
@@ -227,7 +227,7 @@
 
 目的：避免在身份不明时把关键资源浪费给“可能是敌人”的目标。
 
-### 5.9 延时锦囊/普通锦囊的“安全门禁”
+### 5.9 延时锦囊/普通锦囊的“安全门槛”
 （`_delayTrickTargetHookInstalled` / `_trickTargetSafetyHookInstalled`）
 
 身份局中，扩展对“未暴露目标”更谨慎：
@@ -237,18 +237,18 @@
   - 有害锦囊（tv<0）：只对已暴露敌方使用
   - 有益锦囊（tv>0）：只对已暴露友方使用（自用不受限）
 
-### 5.10 群体锦囊门禁：弱势不乱开
+### 5.10 群体锦囊门槛：弱势不乱开
 （`_groupTrickGateHookInstalled` / `_groupBeneficialTrickGateHookInstalled`）
 
-身份局对“群体进攻/群体增益”锦囊设门禁：
+身份局对“群体进攻/群体增益”锦囊设门槛：
 
 - 群体进攻（如南蛮/万箭等同类）：仅当“友军人数 < 敌军人数”时才放行
 - 群体增益（如桃园/五谷等同类）：默认更保守，仅在“我方更需要资源”时放行（会考虑主公/输出核心濒危、双方缺血差等）
 
-这些门禁的通用识别与放行条件主要由：
+这些门槛的通用识别与放行条件主要由：
 
 - `card_utils.js`：识别群体进攻/群体增益锦囊
-- `identity_utils.js`：人数与局面门禁（含输出核心判定）
+- `identity_utils.js`：人数与局面门槛（含输出核心判定）
 
 ### 5.11 开路斩友：杀够多时先斩盟友再斩下家（极激进）
 （`_friendlyFireOpenPathHookInstalled`）
@@ -273,7 +273,7 @@
 常见用法：
 
 - 在 `stage==="base"` 时读取引擎原分数并做粗过滤
-- 在 `stage==="final"` 时做强门禁（例如直接 `ctx.score -= 9999`）
+- 在 `stage==="final"` 时做强门槛（例如直接 `ctx.score -= 9999`）
 - 需要完全接管时可设置 `ctx.stop=true` 阻止后续 handler
 - 需要禁用扩展自带噪声/小心眼时可设置 `ctx.skipBuiltin=true`
 
@@ -282,7 +282,7 @@
 
 - 证据权重（洞察）
 - 仇恨权重（记仇）
-- 激进偏置
+- 激进影响
 - 伪装回合
 
 也可直接读取/写入 `player.storage.slqj_ai.memory`（建议只在 dev/调试时使用，避免过强副作用）。

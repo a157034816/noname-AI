@@ -5,7 +5,7 @@ import { isLocalAIPlayer } from "../src/ai_persona/lib/utils.js";
  */
 
 /**
- * scripts 插件元信息（用于“scripts 插件管理”UI 友好展示）。
+ * scripts 插件元信息（用于“脚本插件管理”UI 友好展示）。
  *
  * @type {{name:string, version:string, description:string}}
  */
@@ -18,7 +18,7 @@ export const slqjAiScriptMeta = {
 /**
  * 全局开关：是否启用“贪心 + 少量前瞻（1 步）”。
  *
- * - 关闭：仅使用当前牌的局部收益（约数/倍数/断链等）做贪心偏置
+ * - 关闭：仅使用当前牌的局部收益（约数/倍数/断链等）做贪心影响
  * - 开启：额外估计“打出该牌后，下一步是否更容易继续约数/倍数链”，并叠加到评分
  *
  * 注意：这是启发式近似，不会真实模拟出牌合法性/牌堆/摸牌结果。
@@ -551,7 +551,7 @@ function installGlobalTrackerSkill({ game, lib }) {
 }
 
 /**
- * 安装 score hook：在选择器评分阶段注入裴秀专属偏置。
+ * 安装 score hook：在选择器评分阶段注入裴秀专属影响。
  *
  * @param {{game:any,hooks:any,runtime:any}} opts
  * @returns {void}
@@ -775,7 +775,7 @@ function scoreJuezhiGainNum(num, mark) {
 }
 
 /**
- * 行图（xingtu）用牌偏置：
+ * 行图（xingtu）用牌影响：
  * - 优先约数牌：满足 `上一张点数 % 本张点数 == 0`（摸牌）
  * - 次优倍数牌：满足 `本张点数 % 上一张点数 == 0`（无次数限制）
  *
@@ -877,7 +877,7 @@ function applyXingtuUseBias(ctx, runtime, player, get, card, num, mark) {
 }
 
 /**
- * 爵制（juezhi）选牌偏置：倾向合成与当前行图点数（mark）有倍数/约数关系的结果点数，
+ * 爵制（juezhi）选牌影响：倾向合成与当前行图点数（mark）有倍数/约数关系的结果点数，
  * 同时尽量不牺牲关键牌、低点装备等“裴秀高价值牌”。
  *
  * 说明：爵制的点数合成规则为 “所选牌点数之和 mod 13（0 视为 13）”。本逻辑主要优化：
@@ -897,7 +897,7 @@ function applyJuezhiPickBias(ctx, runtime, player, get, num, mark) {
 	const selectedNums = selected.map((c) => safeGetNumber(get, c, player)).filter((n) => typeof n === "number");
 	const selectedSum = selectedNums.reduce((a, b) => a + b, 0);
 
-	// 基于“弃牌价值”的通用偏置：越不值钱越更愿意拿去爵制
+	// 基于“弃牌价值”的通用影响：越不值钱越更愿意拿去爵制
 	const v = safeGetValue(get, ctx.candidate, player);
 	let delta = clamp((5 - v) / 10, -0.4, 0.4);
 

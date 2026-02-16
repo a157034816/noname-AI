@@ -1,5 +1,5 @@
 /**
- * 开局选将偏置（身份局）：实现“反贼多选群体型辅助”等经验规则。
+ * 开局选将影响（身份局）：实现“反贼多选群体型辅助”等经验规则。
  *
  * 设计目标：
  * - 不改动引擎 AI 评估函数，仅通过重排候选列表影响“AI 更可能选到哪些武将”
@@ -10,7 +10,7 @@
 import { isLocalAIPlayer } from "../lib/utils.js";
 
 /**
- * 安装开局选将偏置：包装 `game.createEvent`，在创建 `chooseCharacter` 事件时 patch `event.ai`。
+ * 安装开局选将影响：包装 `game.createEvent`，在创建 `chooseCharacter` 事件时 patch `event.ai`。
  *
  * @param {{game:any, lib:any, get:any, _status:any}} param0
  * @returns {void}

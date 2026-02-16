@@ -5,7 +5,7 @@ import { getCampOutputCorePlayer, getPlayerCamp } from "../stats.js";
  * 判断当前是否满足“忠臣已全部阵亡”（基于真实身份）。
  *
  * 说明：
- * - 该判断仅用于身份局中后期的门禁放宽：当主忠侧已无忠臣存活时，误伤忠臣的风险显著下降
+ * - 该判断仅用于身份局中后期的门槛放宽：当主忠侧已无忠臣存活时，误伤忠臣的风险显著下降
  * - 这里读取引擎真实身份字段，但仅用于布尔判定，不对外暴露任何玩家身份信息
  *
  * @param {*} game
@@ -23,7 +23,7 @@ function isAllZhongDead(game) {
 }
 
 /**
- * 按“猜测身份”判定某目标是否为敌方（仅用于身份局的保守目标门禁）。
+ * 按“猜测身份”判定某目标是否为敌方（仅用于身份局的保守目标门槛）。
  *
  * @param {*} selfIdentity
  * @param {*} guessIdentity
@@ -125,7 +125,7 @@ export function shouldReserveTao(player, target, game, get) {
 }
 
 /**
- * 群体进攻锦囊门禁（身份局）：排除死亡后再排除内奸，友军人数 < 敌军人数时才允许使用。
+ * 群体进攻锦囊门槛（身份局）：排除死亡后再排除内奸，友军人数 < 敌军人数时才允许使用。
  *
  * @param {*} player
  * @param {*} game
@@ -168,7 +168,7 @@ export function shouldUseOffensiveGroupTrick(player, game, get) {
 }
 
 /**
- * 群体有益锦囊门禁（身份局）：避免弱势时把资源也送给敌方。
+ * 群体有益锦囊门槛（身份局）：避免弱势时把资源也送给敌方。
  *
  * @param {*} player
  * @param {*} game

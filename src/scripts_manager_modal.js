@@ -49,8 +49,8 @@ export async function openScriptsPluginManagerModal(opts) {
   let disabled = { ...initialRegistry.disabled };
 
   const shell = createModalShell({
-    title: "scripts 插件管理",
-    subtitle: "修改后建议重启生效（与 scripts 加载器的启动时机一致）。",
+    title: "脚本插件管理",
+    subtitle: "修改后建议重启生效。",
     ui,
   });
   active = { close: shell.close };

@@ -5,7 +5,7 @@ import { isLocalAIPlayer } from "../src/ai_persona/lib/utils.js";
  */
 
 /**
- * scripts 插件元信息（用于“scripts 插件管理”UI 友好展示）。
+ * scripts 插件元信息（用于“脚本插件管理”UI 友好展示）。
  *
  * @type {{name:string, version:string, description:string}}
  */
@@ -156,7 +156,7 @@ function shouldAffectPlayer(player, game, runtime, _status) {
 }
 
 /**
- * 在 `slqj_ai_score`（chooseCard）阶段注入评分偏置：
+ * 在 `slqj_ai_score`（chooseCard）阶段注入评分影响：
  * - 若本阶段已有上一张牌：强烈偏好“点数或花色相同”的候选（更易触发渐营摸牌）
  * - 若本阶段尚无上一张牌：轻微偏好“更容易连锁”的候选（为下一张牌做铺垫）
  *
