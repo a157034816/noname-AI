@@ -21,7 +21,7 @@ export function createDrawOtherProcessor() {
 	);
 	// “交换后手牌较少/最少的角色摸X张牌” 等特例（常见于缔盟类描述）。
 	const reLessHandDraw = new RegExp(String.raw`(?:交换后)?手牌(?:数)?(?:最少|较少|更少)的角色摸${NUM}张牌`);
-	// “点数唯一最大的角色摸体力值张牌” 等口径：按“令他人摸牌”处理。
+	// “点数唯一最大的角色摸体力值张牌” 等规则：按“令他人摸牌”处理。
 	const reRoleDrawHpCount = /(?:角色|其|该角色|目标角色|目标|当前回合角色|其他角色|这些角色)[^。]{0,20}摸(?:其)?体力值张牌/;
 
 	const HAND_COUNT_TARGET = String.raw`(?:${NUM}|手牌上限|体力上限|角色数|上限)`;

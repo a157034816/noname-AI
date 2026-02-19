@@ -143,7 +143,7 @@ function wrapBaseAi(baseAi, env) {
 			// 这里对本次调用涉及到的 key 做一次临时过滤，确保随机替换不会落到禁将上。
 			restoreCharacterReplace = patchCharacterReplaceForCall(env.lib, bannedSet, env.get, list, list2, back);
 
-			// 常见口径：AI 候选在 list，候选池在 back（可“换入换出”保持总量不变）
+			// 常见规则：AI 候选在 list，候选池在 back（可“换入换出”保持总量不变）
 			if (Array.isArray(list) && Array.isArray(back)) {
 				const ok = rerollCandidatesUntilSafe(list, back, bannedSet, env);
 				if (ok) return baseAi.apply(this, arguments);
@@ -158,7 +158,7 @@ function wrapBaseAi(baseAi, env) {
 			const hasList = Array.isArray(list);
 			const hasList2 = Array.isArray(list2);
 
-			// 兼容口径：部分模式只给 list（无 back），或将主公候选放在 list2
+			// 兼容规则：部分模式只给 list（无 back），或将主公候选放在 list2
 			if (hasList || hasList2) {
 				const safeList = hasList ? filterSafeCandidates(list, bannedSet, env.get) : list;
 				const safeList2 = hasList2 ? filterSafeCandidates(list2, bannedSet, env.get) : list2;
@@ -231,7 +231,7 @@ function isDianjiangchunEnabled(game, lib) {
 		if (!exts.includes("点绛唇")) return false;
 		// 点绛唇启用开关可能未写入（未显式设置）：
 		// - 显式 false：视为禁用
-		// - true/undefined/其他：视为启用（与引擎 hasExtension 的默认口径一致，但避免写配置副作用）
+		// - true/undefined/其他：视为启用（与引擎 hasExtension 的默认规则一致，但避免写配置副作用）
 		const flag = lib.config ? lib.config["extension_点绛唇_enable"] : undefined;
 		return flag !== false;
 	} catch (e) {}

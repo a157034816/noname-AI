@@ -261,7 +261,7 @@ function onEmotionThrowHook(ctx, game, _status) {
 		}
 	}
 
-	// 仅“目标”为本地 AI 才可能反击（鸡蛋大战同样遵循该口径，避免强制玩家丢表情）
+	// 仅“目标”为本地 AI 才可能反击（鸡蛋大战同样遵循该规则，避免强制玩家丢表情）
 	if (!isLocalAIPlayer(target, game, _status)) return;
 
 	// 鸡蛋大战：不看怒气/冷却/单回合上限，尽可能无限互砸（直到游戏结束或到期）

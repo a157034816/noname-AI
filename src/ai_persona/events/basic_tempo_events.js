@@ -50,7 +50,7 @@ function safeGetPhaseUseCardHistory(player) {
 /**
  * 更新“对手【杀】密度倾向”推断：
  * - 基于公开信息：useCardAfter + 出牌阶段进度
- * - 口径：越早在出牌阶段打出【杀】，越可能“杀多”；连续出杀信号更强
+ * - 规则：越早在出牌阶段打出【杀】，越可能“杀多”；连续出杀信号更强
  *
  * 写入位置：观察者的 `player.storage.slqj_ai.memory.basicTempo[targetPid].sha`
  *

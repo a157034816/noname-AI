@@ -57,7 +57,7 @@ export function createDrawSelfProcessor() {
 		String.raw`你(?:(?!令|使)[^。]){0,30}(?:将)?(?:手牌数|手牌)[^。]{0,10}调整至${HAND_COUNT_TARGET}${HAND_COUNT_SUFFIX}`
 	);
 
-	// 摸牌阶段增益：摸牌数+X / 额定摸牌数+X（常见于装备/锁定技口径）。
+	// 摸牌阶段增益：摸牌数+X / 额定摸牌数+X（常见于装备/锁定技规则）。
 	const reDrawCountPlus = new RegExp(String.raw`(?:额定)?摸牌数\s*\+\s*${NUM}`);
 	// 额外/多摸：摸牌阶段你额外摸X张牌 / 你多摸X张牌
 	const reExtraDraw = new RegExp(String.raw`你[^。]{0,20}(?:额外|多)摸${NUM}张牌`);
@@ -65,11 +65,11 @@ export function createDrawSelfProcessor() {
 	const reDrawEqual = /摸等量(?:张)?的?牌/;
 	// 体力值张牌：摸其体力值张牌/摸体力值张牌
 	const reDrawHpCount = /摸(?:其)?体力值(?:数)?张牌/;
-	// 已损失体力值张牌：摸你已损失体力值张牌（常见于“卖血换牌/弃牌后摸”口径）。
+	// 已损失体力值张牌：摸你已损失体力值张牌（常见于“卖血换牌/弃牌后摸”规则）。
 	const reDrawLostHpCount = /摸(?:你)?已损失(?:的)?体力值(?:数)?张牌/;
 	// 额外摸牌阶段：执行/进行一个额外的摸牌阶段。
 	const reExtraDrawPhase = /(?:执行|进行)(?:一个)?额外的?摸牌阶段/;
-	// 特例：dcweiji 等口径——“你摸你选择数字张牌”。
+	// 特例：dcweiji 等规则——“你摸你选择数字张牌”。
 	const reDrawPickNumber = /你摸你选择[^。]{0,10}张牌/;
 	// 翻倍：下次摸牌翻倍/令自己本回合下次摸牌翻倍
 	const reDrawDouble = /摸牌翻倍/;

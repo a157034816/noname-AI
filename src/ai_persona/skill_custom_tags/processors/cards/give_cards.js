@@ -15,7 +15,7 @@ export function createGiveCardsProcessor() {
 	const reGiveAll = /将所有[^。]{0,40}(?:手牌|牌)[^。]{0,20}(?:交给|赠予)/;
 	const reGiveEqual = /(?:交给|赠予)等量[^。]{0,30}角色/;
 	const reShowGive = new RegExp(String.raw`展示(?:至少|至多)?(?:${NUM}|任意)张${CARD_TAIL}?[^。]{0,30}(?:交给|赠予)`);
-	// 兼容：“展示并将所有……手牌交给……”（常见于“按花色全交”口径）。
+	// 兼容：“展示并将所有……手牌交给……”（常见于“按花色全交”规则）。
 	const reShowGiveAll = /展示[^。]{0,40}将所有[^。]{0,60}(?:手牌|牌)[^。]{0,20}(?:交给|赠予)/;
 
 	return {

@@ -57,7 +57,7 @@ function safeGetInfo(item, get) {
 }
 
 /**
- * 判断某牌是否为“群体/全体”指向（selectTarget:-1 口径）。
+ * 判断某牌是否为“群体/全体”指向（selectTarget:-1 规则）。
  *
  * @param {*} card
  * @param {*} get
@@ -326,7 +326,6 @@ function safeGetCardValue(get, card, owner) {
 /**
  * 计算“拆/顺”对目标的等价收益数值（tv）：正=帮助目标，负=伤害目标。
  *
- * 规则（与 docs/敌友判断因素1.md 对齐，保守实现）：
  * - 判定区：拆掉恶意延时（乐/兵/闪电/伏雷）视为帮助（tv=+1）
  * - 装备/手牌：视为伤害（tv<0），幅度参考 get.value（暗手牌默认按中性价值处理）
  * - 例外：非满血目标的【白银狮子】（baiyin）被拆/被顺视为中立（tv=0）
@@ -687,13 +686,12 @@ export function onUseCardToTargetedExpose(trigger, player, game, get, _status) {
 /**
  * 身份局：在 useCardToTargeted 阶段记录“善意/恶意举措”对敌友判断的影响（写入 evidence）。
  *
- * 口径（与 docs/敌友判断因素1.md 对齐，保守实现）：
  * - 仅身份局、仅本地 AI 观察者记录
  * - 仅单目标（targets.length===1）
  * - 排除“群体/全体”牌（selectTarget:-1）
  * - Wuxie（无懈可击）：支持链式无懈（无懈无懈），按层数奇偶对原 tv 取反（奇数取反；偶数还原）
  * - 拆/顺（过河/顺手）：在 rewriteDiscardResult/rewriteGainResult 阶段按实际被拆/被顺的牌所在区域细化记录，避免重复计数
- * - 仅使用引擎公开的 ai.result / get.result 口径，不读取暗牌或真实身份
+ * - 仅使用引擎公开的 ai.result / get.result ，不读取暗牌或真实身份
  *
  * @param {*} trigger
  * @param {*} player
@@ -832,7 +830,7 @@ export function onRewriteGainResultEvidence(trigger, player, game, get, _status)
 /**
  * 身份局：在 useSkill 阶段记录“善意/恶意举措”对敌友判断的影响（写入 evidence）。
  *
- * 口径（保守实现）：
+ * 规则（保守实现）：
  * - 仅身份局、仅本地 AI 观察者记录
  * - 仅单目标（targets.length===1）
  * - 跳过 viewAs 技能（由用牌事件覆盖，避免重复计数）

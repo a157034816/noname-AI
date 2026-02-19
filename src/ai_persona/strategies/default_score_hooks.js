@@ -93,7 +93,7 @@ function safeGetTurnMemory(player) {
  *
  * 说明：
  * - 仅在 player 为本回合 activePid 时统计（避免回合外/响应阶段把历史伤害算进来）
- * - 口径用于限制开局“同回合盲打连击收割”的过激倾向
+ * - 规则用于限制开局“同回合盲打连击收割”的过激倾向
  *
  * @param {*} player
  * @param {*} target
@@ -191,7 +191,7 @@ function safeGetWeaponCard(player, get) {
 /**
  * 估算玩家“失去武器后会被卡距离”的风险（轻量启发式）。
  *
- * 口径（按“卡距离=范围内没有可攻击目标”）：
+ * 规则（按“卡距离=范围内没有可攻击目标”）：
  * - 若玩家失去武器后，其估算攻击范围内没有任何“明确敌对目标”（attitude<-0.3），则判定为有风险。
  * - 该判定是距离层面的轻量启发式，不精确模拟所有技能/装备带来的额外选目标限制。
  *
@@ -452,7 +452,7 @@ function safeGetNatureList(card, get) {
 /**
  * 获取【杀】的“保留层级”（越稀有越应保留）。
  *
- * 口径：火杀 > 雷杀 > 红杀 > 黑杀。
+ * 规则：火杀 > 雷杀 > 红杀 > 黑杀。
  *
  * @param {*} card
  * @param {*} get
@@ -731,7 +731,7 @@ function isDamageLikeChooseTargetEvent(event, get) {
  * - 在进攻决策（chooseTarget）阶段避免无意义地“喂卖血”
  * - 不精确模拟技能结算，仅区分“过牌/回血/拿牌/反制伤害/控制/救援”等收益
  *
- * 口径：
+ * 规则：
  * - 仅统计同时带有卖血标记的技能，避免把目标其他无关收益技能算入
  * - 若无法识别具体收益但目标确有卖血标签，则返回保守默认值（被动≈2.0，主动≈1.0）
  *
@@ -1141,10 +1141,10 @@ function estimateActiveMaixieCardEconomy(skill, info, player, event, get) {
 	if (Number.isFinite(best) && best > 0) {
 		cardGain = best;
 	} else if (ai[TAG_DRAW_SELF]) {
-		// 保守默认：主动卖血摸牌的典型口径（苦肉）为 1 血换 2 牌
+		// 保守默认：主动卖血摸牌的典型规则（苦肉）为 1 血换 2 牌
 		cardGain = 2;
 	} else if (ai[TAG_GAIN_OTHER_CARDS]) {
-		// 获得牌的口径差异较大，这里不强行拉高，避免误把“1 血换 1 牌”当作梭哈条件
+		// 获得牌的规则差异较大，这里不强行拉高，避免误把“1 血换 1 牌”当作梭哈条件
 		cardGain = 1;
 	}
 
@@ -1260,7 +1260,7 @@ function getActiveMaixieZhugeAllInContext(player, skill, info, event, game, get)
 /**
  * 判断是否存在“杀盟友开路 -> 杀下家敌人”的爆发线（非常激进）。
  *
- * 口径（轻量启发式）：
+ * 规则（轻量启发式）：
  * - 你的下家为“盟友”（att>0.6），其下家为“敌人”（att<-0.6）
  * - 你当前无法对该敌人出【杀】（大概率因距离），且预计“打掉盟友后距离降低 1”即可出杀
  * - 你具备多次出【杀】能力（诸葛连弩/无限杀/额外杀），且手里【杀】数量足够覆盖“击杀盟友 + 击杀敌人”
@@ -1584,7 +1584,7 @@ function getTargetUseValueFromEvent(player, target, event, get) {
 /**
  * 判断技能是否更像“过牌/确立资源”的主动技能。
  *
- * 口径（启发式，容忍少量误判）：
+ * 规则（启发式，容忍少量误判）：
  * - 首选：技能定义了 `ai.tag.draw|gain`
  * - 兜底：从 prompt 文案提取“摸牌/获得牌/观看牌堆顶/重铸”等信号
  * - 再兜底：若技能为“无目标主动技”且 `ai.result.player` 明显为正，也视为过牌类候选
@@ -1720,7 +1720,7 @@ function hasNotActedYetThisRound(actor, target) {
  *
  * 说明：
  * - 该判定用于约束主公首轮在信息不足时的“盲目乱打”。
- * - “暴露”口径：`identityShown===true` 或 `ai.shown>0`（软暴露）。
+ * - “暴露”规则：`identityShown===true` 或 `ai.shown>0`（软暴露）。
  *
  * @param {*} player
  * @param {*} game
@@ -2039,7 +2039,7 @@ function getEquipKind(card, get) {
 /**
  * 判断“当前是否存在明确的进攻需求”（轻量近似）。
  *
- * 口径：若手牌里存在【杀】或【顺手牵羊】，且当前能对任一明显敌对目标实际使用，则认为“有进攻需求”。\n
+ * 规则：若手牌里存在【杀】或【顺手牵羊】，且当前能对任一明显敌对目标实际使用，则认为“有进攻需求”。\n
  * @param {*} player
  * @param {*} game
  * @param {*} get
@@ -2168,7 +2168,7 @@ function getPlayerPower(player) {
 /**
  * 计算“局势指数”（顺风>0，逆风<0），用于把「顺风求稳，逆风求变」落到评分调节上。
  *
- * 口径（跨模式通用）：
+ * 规则（跨模式通用）：
  * 1) 若可从态度推断阵营关系（存在明显的友/敌），则用“我方(含自己) vs 敌方(含中立折算)”的强弱差；
  * 2) 否则回退为“自己 vs 其他人平均强度”的差。
  *
@@ -2430,7 +2430,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				const zhu = game?.zhu;
 				if (!zhu) return;
 
-				// 首轮：roundNumber 口径与其他开局策略保持一致（round<=2 的策略同源）
+				// 首轮：roundNumber 规则与其他开局策略保持一致（round<=2 的策略同源）
 				const round = typeof game?.roundNumber === "number" && !Number.isNaN(game.roundNumber) ? game.roundNumber : 0;
 				if (!(round > 0 && round <= 1)) return;
 
@@ -3683,7 +3683,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 						const preTarget = selected.length ? selected[selected.length - 1] : null;
 						const isAddedTargetPick = !!preTarget;
 
-						// 友敌阈值：参考身份局证据系统的口径（±0.3 比 ±0.6 更稳健）
+						// 友敌阈值：参考身份局证据系统的规则（±0.3 比 ±0.6 更稳健）
 						const att = safeAttitude(get, player, target);
 						const friendlyLike = att > 0.3;
 						const enemyLike = att < -0.3;
