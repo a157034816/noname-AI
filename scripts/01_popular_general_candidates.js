@@ -24,8 +24,8 @@ import { isLocalAIPlayer } from "../src/ai_persona/lib/utils.js";
  */
 export const slqjAiScriptMeta = {
 	name: "热门武将候选影响",
-	version: "1.0.3",
-	description: "影响开局 AI 选将候选列表：让热门/强势武将更容易进入候选并被选择。",
+	version: "1.0.4",
+	description: "影响开局 AI 选将候选列表：让热门/强势武将更容易进入候选并被选择（不会换入禁将/点绛唇AI禁用武将）。",
 };
 
 const 启用概率 = 1;
@@ -148,11 +148,13 @@ function patchChooseCharacterEvent(ev, env) {
 				if (player && isLocalAIPlayer(player, env.game, env._status)) {
 					const decision = getPopularBiasDecision(player, env);
 					if (!decision.applyPopular) return originalAi.apply(this, arguments);
+
+					const djcAiBanSet = getDianjiangchunAiBanSet(env.lib);
 					if (Array.isArray(list) && Array.isArray(back)) {
-						biasCandidateList(list, back, env, player);
+						biasCandidateList(list, back, env, player, djcAiBanSet);
 					} else if (Array.isArray(list2) && !Array.isArray(back)) {
 						// 部分模式（如身份局主公）会把候选放在 list2；此处只重排，不动全局池子
-						reorderPopularFirst(list2, env, player);
+						reorderPopularFirst(list2, env, player, djcAiBanSet);
 					}
 				}
 			}
@@ -238,14 +240,223 @@ function getPopularBiasDecision(player, env) {
 }
 
 /**
+ * 点绛唇必须“已安装且启用”。
+ *
+ * @param {*} lib
+ * @returns {boolean}
+ */
+function isDianjiangchunEnabled(lib) {
+	try {
+		const exts = lib && lib.config && lib.config.extensions;
+		if (!exts || typeof exts.includes !== "function") return false;
+		if (!exts.includes("点绛唇")) return false;
+		// 点绛唇启用开关可能未写入（未显式设置）：
+		// - 显式 false：视为禁用
+		// - true/undefined/其他：视为启用
+		const flag = lib.config ? lib.config["extension_点绛唇_enable"] : undefined;
+		return flag !== false;
+	} catch (e) { }
+	return false;
+}
+
+/**
+ * 读取点绛唇的【AI禁用】列表（不存在则回退为空 Set）。
+ *
+ * @param {*} lib
+ * @returns {Set<string>}
+ */
+function getDianjiangchunAiBanSet(lib) {
+	try {
+		if (!isDianjiangchunEnabled(lib)) return new Set();
+		const list = lib && lib.config && lib.config["extension_点绛唇_plans_AI禁用"];
+		if (!Array.isArray(list) || !list.length) return new Set();
+		return new Set(list.map((x) => String(x || "")).filter(Boolean));
+	} catch (e) {
+		return new Set();
+	}
+}
+
+/**
+ * 从候选项中提取武将 key（尽量兼容不同模式的候选结构）。
+ *
+ * @param {*} candidate
+ * @param {*} get
+ * @returns {string}
+ */
+function getCandidateCharacterKey(candidate, get) {
+	if (!candidate) return "";
+	if (typeof candidate === "string") return candidate;
+	if (Array.isArray(candidate)) return String(candidate[0] || "");
+	if (typeof candidate === "object") {
+		// 常见结构：{name:'xxx'} / {link:'xxx'}
+		// @ts-ignore
+		if (typeof candidate.name === "string") return candidate.name;
+		// @ts-ignore
+		if (typeof candidate.link === "string") return candidate.link;
+	}
+	return String(candidate || "");
+}
+
+/**
+ * 判断某武将是否属于“引擎禁用/禁将”范围。
+ *
+ * 说明：
+ * - 统一使用 `lib.filter.characterDisabled/characterDisabled2`（若存在）
+ * - 其中会包含：模式禁将、双将禁将、AI禁用（forbidai/isAiForbidden）等
+ *
+ * @param {*} key
+ * @param {*} lib
+ * @returns {boolean}
+ */
+function isEngineCharacterDisabled(key, lib) {
+	const name = getCandidateCharacterKey(key, null);
+	if (!name) return true;
+	try {
+		const fn = lib && lib.filter && lib.filter.characterDisabled;
+		if (typeof fn === "function" && fn(name)) return true;
+	} catch (e) { }
+	try {
+		const fn2 = lib && lib.filter && lib.filter.characterDisabled2;
+		if (typeof fn2 === "function" && fn2(name)) return true;
+	} catch (e) { }
+	return false;
+}
+
+/**
+ * 判断某武将是否属于点绛唇的【AI禁用】范围。
+ *
+ * 兼容：同时检查原 key 与 `get.sourceCharacter(key)`（若存在）。
+ *
+ * @param {*} key
+ * @param {Set<string>} bannedSet
+ * @param {*} get
+ * @returns {boolean}
+ */
+function isDianjiangchunAiBanned(key, bannedSet, get) {
+	if (!bannedSet || !bannedSet.size) return false;
+	const name = getCandidateCharacterKey(key, get);
+	if (!name) return false;
+	if (bannedSet.has(name)) return true;
+	try {
+		if (get && typeof get.sourceCharacter === "function") {
+			const src = get.sourceCharacter(name);
+			if (src && bannedSet.has(src)) return true;
+		}
+	} catch (e) { }
+	return false;
+}
+
+/**
+ * 判断某候选项是否“禁止出现在 AI 候选中”。
+ *
+ * 规则：
+ * - 引擎禁将/禁用（含模式禁将、forbidai 等）
+ * - 点绛唇 AI禁用（仅当点绛唇启用且配置了列表时）
+ *
+ * @param {*} candidate
+ * @param {{lib:any,get:any}} env
+ * @param {Set<string>} djcAiBanSet
+ * @returns {boolean}
+ */
+function isForbiddenCandidate(candidate, env, djcAiBanSet) {
+	const key = getCandidateCharacterKey(candidate, env && env.get);
+	if (!key) return true;
+	if (isEngineCharacterDisabled(key, env && env.lib)) return true;
+	if (isDianjiangchunAiBanned(key, djcAiBanSet, env && env.get)) return true;
+	return false;
+}
+
+/**
+ * 从 pool 中挑选一个可用于替换的“未禁用且不与 list 冲突”的索引。
+ *
+ * @param {any[]} pool
+ * @param {any[]} list
+ * @param {{lib:any,get:any}} env
+ * @param {Set<string>} djcAiBanSet
+ * @param {boolean} allowDuplicate
+ * @returns {number}
+ */
+function pickRandomSafeReplacementIndex(pool, list, env, djcAiBanSet, allowDuplicate) {
+	const used = allowDuplicate
+		? null
+		: new Set(list.map((x) => getCandidateCharacterKey(x, env && env.get)).filter(Boolean));
+	const candidates = [];
+	for (let i = 0; i < pool.length; i++) {
+		const c = pool[i];
+		const key = getCandidateCharacterKey(c, env && env.get);
+		if (!key) continue;
+		if (used && used.has(key)) continue;
+		if (isForbiddenCandidate(c, env, djcAiBanSet)) continue;
+		candidates.push(i);
+	}
+	if (!candidates.length) return -1;
+	return candidates[Math.floor(Math.random() * candidates.length)];
+}
+
+/**
+ * 尝试把 list 中的“禁用候选”从 pool（back）中重抽替换为安全候选，保持总量不变。
+ *
+ * @param {any[]} list
+ * @param {any[]} pool
+ * @param {{lib:any,get:any,logger:any}} env
+ * @param {*} player
+ * @param {Set<string>} djcAiBanSet
+ * @returns {boolean} 是否已确保 list 不含禁用候选（best effort）
+ */
+function rerollForbiddenCandidatesUntilSafe(list, pool, env, player, djcAiBanSet) {
+	if (!Array.isArray(list) || !list.length) return true;
+	if (!Array.isArray(pool) || !pool.length) {
+		for (const c of list) {
+			if (isForbiddenCandidate(c, env, djcAiBanSet)) return false;
+		}
+		return true;
+	}
+
+	const maxRounds = 20;
+	for (let round = 0; round < maxRounds; round++) {
+		const forbiddenIndexes = [];
+		for (let i = 0; i < list.length; i++) {
+			if (isForbiddenCandidate(list[i], env, djcAiBanSet)) forbiddenIndexes.push(i);
+		}
+		if (!forbiddenIndexes.length) return true;
+
+		let changed = false;
+		for (const idx of forbiddenIndexes) {
+			const forbidden = list[idx];
+			let repIndex = pickRandomSafeReplacementIndex(pool, list, env, djcAiBanSet, false);
+			if (repIndex < 0) repIndex = pickRandomSafeReplacementIndex(pool, list, env, djcAiBanSet, true);
+			if (repIndex < 0) {
+				env.logger &&
+					env.logger.warn &&
+					env.logger.warn("no replacement for forbidden candidate:", forbidden, "player:", safePlayerName(player));
+				return false;
+			}
+			const replacement = pool[repIndex];
+			pool.splice(repIndex, 1);
+			pool.push(forbidden);
+			list[idx] = replacement;
+			changed = true;
+		}
+		if (!changed) return false;
+	}
+	env.logger && env.logger.warn && env.logger.warn("reroll forbidden candidates timeout");
+	return false;
+}
+
+/**
  * 将 pool 中的热门武将“换入”候选 list（保持总量不变，并把被换出的候选放回 pool）。
  * @param {string[]} list
  * @param {string[]} pool
  * @param {{lib:any,get:any,popular:Set<string>,logger:any}} env
  * @param {*} player
+ * @param {Set<string>} djcAiBanSet
  */
-function biasCandidateList(list, pool, env, player) {
-	if (!list.length || !pool.length) return reorderPopularFirst(list, env, player);
+function biasCandidateList(list, pool, env, player, djcAiBanSet) {
+	if (!list.length || !pool.length) return reorderPopularFirst(list, env, player, djcAiBanSet);
+	// 先尝试把“禁用候选”替换出去：避免后续重排把禁用项推到前面造成误选
+	try {
+		rerollForbiddenCandidatesUntilSafe(list, pool, env, player, djcAiBanSet);
+	} catch (e) { }
 	let want = 1;
 	try {
 		if (env.get && typeof env.get.config === "function" && env.get.config("double_character")) want = 2;
@@ -253,8 +464,8 @@ function biasCandidateList(list, pool, env, player) {
 	want = Math.min(want, list.length);
 
 	for (let i = 0; i < want; i++) {
-		if (isPopular(list[i], env)) continue;
-		const idx = pool.findIndex((c) => isPopular(c, env));
+		if (isPopular(list[i], env) && !isForbiddenCandidate(list[i], env, djcAiBanSet)) continue;
+		const idx = pool.findIndex((c) => isPopular(c, env) && !isForbiddenCandidate(c, env, djcAiBanSet));
 		if (idx < 0) break;
 		const hot = pool[idx];
 		pool.splice(idx, 1);
@@ -263,30 +474,41 @@ function biasCandidateList(list, pool, env, player) {
 		list[i] = hot;
 		env.logger.debug("swap in hot:", hot, "swap out:", replaced, "slot:", i, "player:", safePlayerName(player));
 	}
-	reorderPopularFirst(list, env, player);
+	reorderPopularFirst(list, env, player, djcAiBanSet);
 }
 
 /**
  * @param {string[]} list
- * @param {{get:any,popular:Set<string>,logger:any}} env
+ * @param {{lib:any,get:any,popular:Set<string>,logger:any}} env
  * @param {*} player
+ * @param {Set<string>} djcAiBanSet
  */
-function reorderPopularFirst(list, env, player) {
+function reorderPopularFirst(list, env, player, djcAiBanSet) {
 	if (!Array.isArray(list) || list.length <= 1) return;
-	const hot = [];
-	const cold = [];
-	for (const c of list) (isPopular(c, env) ? hot : cold).push(c);
-	if (!hot.length || !cold.length) return;
+	const hotSafe = [];
+	const safe = [];
+	const forbidden = [];
+	for (const c of list) {
+		if (isForbiddenCandidate(c, env, djcAiBanSet)) forbidden.push(c);
+		else if (isPopular(c, env)) hotSafe.push(c);
+		else safe.push(c);
+	}
+	// 无需改动：全热/全非热，且也没有禁用项需要沉底
+	if (!forbidden.length && (!hotSafe.length || !safe.length)) return;
+	// 仅禁用项存在但已全沉底：无需重排
+	if (forbidden.length && forbidden.length === list.length) return;
 	const before = env.logger.isVerbose ? list.slice(0, 6) : null;
 	list.length = 0;
-	list.push(...hot, ...cold);
+	list.push(...hotSafe, ...safe, ...forbidden);
 	if (env.logger.isVerbose) {
 		env.logger.debug(
 			"reorder popular first:",
-			"hot=",
-			hot.length,
+			"hotSafe=",
+			hotSafe.length,
+			"forbidden=",
+			forbidden.length,
 			"total=",
-			hot.length + cold.length,
+			hotSafe.length + safe.length + forbidden.length,
 			"player:",
 			safePlayerName(player),
 			"head:",

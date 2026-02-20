@@ -202,7 +202,7 @@ HookBus 支持 `priority`（越大越先执行）：
 元信息：
 
 - name：热门武将候选影响
-- version：1.0.3
+- version：1.0.4
 - 作用：影响开局 AI 选将候选列表，让热门/强势武将更容易出现并被选择
 
 接入点：
@@ -218,6 +218,9 @@ HookBus 支持 `priority`（越大越先执行）：
    - `启用概率=1`：进入判定池后再按概率决定是否启用（当前为 100%）
 3) **候选重排/换入**：
    - 将热门 key 尽量换入候选前若干槽位，并整体把热门放前
+4) **禁将/AI禁用过滤**：
+   - 不会把引擎禁将/禁用（`characterDisabled/characterDisabled2`）或点绛唇【AI禁用】武将换入候选
+   - 若候选中已出现禁用项，会优先从候选池重抽替换；无法替换时至少把禁用项沉底
 
 额外补丁（重要）：
 
@@ -231,7 +234,33 @@ HookBus 支持 `priority`（越大越先执行）：
 
 ---
 
-### 6.2 `10_chain_elemental_teamplay.js`：队友配合（铁索传导）
+### 6.2 `02_dianjiangchun_ai_ban_choose_character.js`：点绛唇：AI禁将时机优化
+
+元信息：
+
+- name：点绛唇：AI禁将时机优化
+- version：1.0.1
+- 作用：点绛唇启用后，把 AI 禁将从 gameStart 提前到选将阶段：AI候选中若出现“AI禁用”武将则自动重抽替换，尽量避免“先选将→开局强制换将”的观感与副作用。
+
+接入点：
+
+- 包装 `game.createEvent("chooseCharacter")`：在 chooseCharacter 事件对象上安装一次性的 `ai` 包装器
+- 包装基础 `event.ai(player, list, list2, back)`：对本地 AI 的候选做禁将过滤与重抽替换
+
+关键机制：
+
+1) 读取点绛唇配置 `extension_点绛唇_plans_AI禁用`（空则不生效）
+2) 若候选在 `list` 且存在候选池 `back`：从 `back` 中抽取未禁用武将替换，并把禁将放回 `back`，直到候选不含禁将或无可替换
+3) 若候选位于 `list2`（常见于部分模式的主公候选）：仅对入参做过滤，不改写原数组与全局池子
+4) 临时过滤 `lib.characterReplace`：避免选将阶段的随机替换落到 AI禁用武将
+
+潜在副作用：
+
+- 当可用候选池不足时，可能无法完全替换禁将（会尽量保证传入基础 ai 的候选更安全）
+
+---
+
+### 6.3 `10_chain_elemental_teamplay.js`：队友配合（铁索传导）
 
 元信息：
 
@@ -273,7 +302,7 @@ HookBus 支持 `priority`（越大越先执行）：
 
 ---
 
-### 6.3 `20_peixiu_takeover.js`：裴秀 AI 接管（行图/爵制）
+### 6.4 `20_peixiu_takeover.js`：裴秀 AI 接管（行图/爵制）
 
 元信息：
 
@@ -304,7 +333,7 @@ HookBus 支持 `priority`（越大越先执行）：
 
 ---
 
-### 6.4 `21_wu_zhugeliang_takeover.js`：武诸葛亮 AI 接管（情势/智哲）
+### 6.5 `21_wu_zhugeliang_takeover.js`：武诸葛亮 AI 接管（情势/智哲）
 
 元信息：
 
@@ -328,7 +357,7 @@ HookBus 支持 `priority`（越大越先执行）：
 
 ---
 
-### 6.5 `22_xin_jushou_zhuge_bonus.js`：界沮授红利（摸牌影响诸葛连弩）
+### 6.6 `22_xin_jushou_zhuge_bonus.js`：界沮授红利（摸牌影响诸葛连弩）
 
 元信息：
 
@@ -353,7 +382,7 @@ HookBus 支持 `priority`（越大越先执行）：
 
 ---
 
-### 6.6 `23_xin_jushou_jianying_ai.js`：界沮授 AI 加强（渐营优先）
+### 6.7 `23_xin_jushou_jianying_ai.js`：界沮授 AI 加强（渐营优先）
 
 元信息：
 
@@ -378,7 +407,7 @@ HookBus 支持 `priority`（越大越先执行）：
 
 ---
 
-### 6.7 `30_friendly_rage_egg_throw.js`：友善互动（怒气丢鸡蛋）
+### 6.8 `30_friendly_rage_egg_throw.js`：友善互动（怒气丢鸡蛋）
 
 元信息：
 
@@ -421,7 +450,7 @@ HookBus 支持 `priority`（越大越先执行）：
 
 ---
 
-### 6.8 技能自定义tag补全（框架）【已迁移至扩展核心】
+### 6.9 技能自定义tag补全（框架）【已迁移至扩展核心】
 
 说明：
 
