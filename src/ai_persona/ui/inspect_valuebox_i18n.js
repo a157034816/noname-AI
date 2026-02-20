@@ -35,7 +35,6 @@ const VB = {
   rage: { zh: "怒气", en: "Rage" },
   rageTo: { zh: "对其怒气", en: "Rage To" },
   basicInference: { zh: "基本牌推断", en: "Basic Inference" },
-  shaTempo: { zh: "杀密度倾向", en: "Sha Density Bias" },
 };
 
 const EXPOSE_LEVEL = {
@@ -565,29 +564,6 @@ export function buildInspectText(target, game, get, lang = "zh") {
     )}=${fmt2(
       impression
     )} ${vbText(lang, "evidence")}=${fmt2(evidence)} ${vbText(lang, "grudge")}=${fmt2(grudge)} ${vbText(lang, "rageTo")}=${fmt2(rageTo)})<br>`;
-  }
-
-  // 基本牌推断：仅展示“杀密度倾向”绝对值较大的 Top 项，避免面板过长
-  const tempoMap = mem.basicTempo && typeof mem.basicTempo === "object" ? mem.basicTempo : null;
-  if (tempoMap) {
-    const entries = [];
-    for (const p of others) {
-      const pid = getPid(p);
-      const rec = tempoMap[pid];
-      const v = rec && typeof rec.sha === "number" && !Number.isNaN(rec.sha) ? rec.sha : 0;
-      if (Math.abs(v) < 0.2) continue;
-      const samples = rec && typeof rec.shaSamples === "number" && !Number.isNaN(rec.shaSamples) ? rec.shaSamples : 0;
-      const name = formatColoredPlayerName(p, get);
-      entries.push({ name, sha: v, samples });
-    }
-    entries.sort((a, b) => Math.abs(b.sha) - Math.abs(a.sha));
-    if (entries.length) {
-      out += "<br>";
-      out += `${vbText(lang, "basicInference")}:<br>`;
-      for (const it of entries.slice(0, 5)) {
-        out += `${it.name}: ${vbText(lang, "shaTempo")}=${fmt2(it.sha)} (n=${it.samples})<br>`;
-      }
-    }
   }
 
   return out;

@@ -41,11 +41,6 @@ export {};
  *  habits?: {
  *    jiuSearchSha?: ("heuristic"|"conservative")
  *  },
- *  basicTempo?: Record<string, {
- *    sha: number,
- *    shaSamples: number,
- *    lastRound: number
- *  }>
  * }} SlqjAiMemory
  */
 

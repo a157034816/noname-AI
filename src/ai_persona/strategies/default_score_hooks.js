@@ -591,20 +591,6 @@ function getJiuSearchShaHabit(player) {
 }
 
 /**
- * 读取“观察者”对某目标的【杀】密度推断（缺失时回退 0）。
- *
- * @param {*} observer
- * @param {*} target
- * @returns {number}
- */
-function safeGetObservedShaTempo(observer, target) {
-	if (!observer || !target) return 0;
-	const rec = observer?.storage?.[STORAGE_KEY]?.memory?.basicTempo?.[getPid(target)];
-	const v = rec?.sha;
-	return typeof v === "number" && !Number.isNaN(v) ? v : 0;
-}
-
-/**
  * 安全读取技能 info（缺失时回退 null）。
  *
  * @param {string} skill
@@ -2626,21 +2612,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 					// 闪：被集火风险高时更要保留最后一闪；嘲讽低且闪多时允许丢“多余的闪”
 					if (name === "shan") {
 						if (shanCount <= 1) {
-							// 若已观测到“敌方杀密度更高”，进一步强化“留最后一闪”的倾向
-							let maxEnemyShaTempo = 0;
-							for (const p of game.players || []) {
-								if (!p || p === player) continue;
-								try {
-									if (typeof p.isDead === "function" && p.isDead()) continue;
-								} catch (e) {
-									// ignore
-								}
-								if (safeAttitude(get, player, p) >= -0.6) continue;
-								const t = safeGetObservedShaTempo(player, p);
-								if (t > maxEnemyShaTempo) maxEnemyShaTempo = t;
-							}
-							const tempoPenalty = clampNumber(maxEnemyShaTempo, 0, 2) * 0.35;
-							ctx.score -= 2.0 + 0.9 * threatFactor + tempoPenalty;
+							ctx.score -= 2.0 + 0.9 * threatFactor;
 							return;
 						}
 						if (shanCount >= 2) {
@@ -2835,48 +2807,6 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				}
 			},
 			{ priority: 5 }
-		);
-	}
-
-	// 推断落地：对手【杀】密度倾向（出牌快→更可能杀多）
-	// - 控场/拆迁类：轻度偏向先处理“杀密度更高”的敌方目标（不推翻基础收益）
-	if (!game.__slqjAiPersona._shaTempoInferenceHookInstalled) {
-		game.__slqjAiPersona._shaTempoInferenceHookInstalled = true;
-		hooks.on(
-			"slqj_ai_score",
-			ctx => {
-				if (!ctx || ctx.kind !== "chooseTarget" || ctx.stage !== "final") return;
-				if (typeof get?.itemtype === "function" && get.itemtype(ctx.candidate) !== "player") return;
-				const player = ctx.player;
-				const target = ctx.candidate;
-				if (!player || !target) return;
-
-				const card = findEventCard(ctx.event);
-				const cardName = String(card?.name || "");
-				if (!cardName) return;
-				if (cardName !== "lebu" && cardName !== "bingliang" && cardName !== "guohe" && cardName !== "shunshou") return;
-
-				// 仅对“有害目标选择”生效（避免干扰少数对友方的正收益拆顺等）
-				const tv = getResultNumberForTarget(card, ctx.event?.skill, player, target, get);
-				if (tv >= 0) return;
-
-				const att = safeAttitude(get, player, target);
-				if (att >= -0.6) return;
-
-				const tempo = safeGetObservedShaTempo(player, target);
-				if (tempo <= 0.6) return;
-
-				const base = typeof ctx.base === "number" && !Number.isNaN(ctx.base) ? ctx.base : 0;
-				if (base <= 0) return;
-				// 高收益目标不做额外推断影响，避免推翻明显最优解
-				if (base >= 4.5) return;
-
-				const k = cardName === "lebu" ? 0.28 : cardName === "bingliang" ? 0.22 : 0.18;
-				const bonus = k * clampNumber(tempo, 0, 2);
-				const scale = clampNumber(1 - base / 4.5, 0.35, 1);
-				ctx.score += bonus * scale;
-			},
-			{ priority: 4 }
 		);
 	}
 

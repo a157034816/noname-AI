@@ -127,23 +127,6 @@ export function installPersonaSkills({ lib, game, get, _status }) {
 	});
 	game.addGlobalSkill("slqj_ai_stat_damage");
 
-	// 基本牌节奏推断：对手【杀】出的越快，越可能“杀多”（仅用公开信息，不读暗牌）
-	ensureSkill(lib, "slqj_ai_basic_tempo", {
-		trigger: { player: "useCardAfter" },
-		forced: true,
-		silent: true,
-		popup: false,
-		filter(event, player) {
-			if (_status.connectMode) return false;
-			if (!event || !event.card) return false;
-			return String(event.card.name || "") === "sha";
-		},
-		content() {
-			game.__slqjAiPersona?.onUseCardAfterBasicTempo?.(trigger, player, game, get, _status);
-		},
-	});
-	game.addGlobalSkill("slqj_ai_basic_tempo");
-
 	// 行为规则：「刚刚被我攻击的人我不救」
 	// - 仅记录“单目标主动进攻”所指向的目标
 	// - 窗口：本次结算链（useCardToTargeted -> useCardAfter）

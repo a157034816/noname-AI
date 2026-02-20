@@ -114,7 +114,6 @@
 - `_equipHoldInHandHookInstalled`
 - `_wuxieKeepPriorityHookInstalled`
 - `_basicCardGeneralTipsHookInstalled`
-- `_shaTempoInferenceHookInstalled`
 - `_handStoragePriorityHookInstalled`
 - `_rageBiasHookInstalled`
 - `_immediateUseValueHookInstalled`
@@ -187,7 +186,7 @@
 这一组规则覆盖多个上下文：
 
 1) **弃牌**：回合外更需要基本牌  
-   - 最后一闪更难弃（并结合“敌方杀密度推断”进一步强化）
+   - 最后一闪更难弃
    - 杀稀缺时更保留；并按火/雷/红/黑做“先丢谁”的倾向
    - 酒重复时更愿意丢（酒一回合只能喝一次）
 
@@ -198,15 +197,6 @@
 3) **出牌阶段**：酒的时机按本局 habit 分流  
    - `habits.jiuSearchSha=conservative`：手里没杀就不空喝酒
    - `heuristic`：允许“先喝酒再找牌”，但要求存在过牌候选作为“找牌载体”，且桌上确有明显敌对目标
-
-### 5.6 基本牌节奏推断落地：优先控“杀密度更高”的敌人
-（`_shaTempoInferenceHookInstalled`）
-
-当扩展从公开信息推断“某敌人杀出得早→杀更多”（见 `basic_tempo_events.js`）后：
-
-- 在使用 `lebu/bingliang/guohe/shunshou` 等控场/拆迁牌选目标时
-- 对“杀密度更高”的敌对目标做小幅加权
-- 但当基础收益已经很高（base>=4.5）时不再额外干预，避免推翻明显最优解
 
 ### 5.7 “刚刚被我攻击的人我不救”
 （`_noRescueRecentAttackHookInstalled`）
