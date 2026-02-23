@@ -1,8 +1,7 @@
 import { isLocalAIPlayer } from "../src/ai_persona/lib/utils.js";
 import { guessIdentityFor } from "../src/ai_persona/guess_identity.js";
 
-// 此脚本有点问题
-return;
+// 注意：该脚本默认关闭，需要在“脚本插件管理 -> 配置(⚙)”里手动启用。
 
 /**
  * @typedef {import("../src/scripts_loader.js").SlqjAiScriptContext} SlqjAiScriptContext
@@ -21,6 +20,51 @@ export const slqjAiScriptMeta = {
   name: "队友配合：铁索传导",
   version: "1.1.5",
   description: "基于投花信号进行队友协作：铁索连环 + 属性伤害传导；AI vs AI 场景可自动确认以提高触发率。",
+};
+
+/**
+ * scripts 插件配置（用于“脚本插件管理 -> 配置(⚙)”）。
+ *
+ * 说明：
+ * - `enabled=false` 时脚本不安装任何 hook/skill（完全不生效）
+ * - 其余字段会在脚本安装时写入 runtime.cfg（仅影响本局）
+ *
+ * @type {{version:1, items:Array<any>}}
+ */
+export const slqjAiScriptConfig = {
+	version: 1,
+	items: [
+		{
+			key: "enabled",
+			name: "启用（默认关闭）",
+			type: "boolean",
+			default: false,
+			description: "开启后才会安装投花确认与铁索传导策略（保存后建议重启生效）。",
+		},
+		{
+			key: "useDebugPresetLow",
+			name: "调试：一键降低门槛",
+			type: "boolean",
+			default: false,
+			description: "开启后会应用“低门槛预设”（仅放宽阈值/窗口，不绕过硬门槛）。",
+		},
+		{ key: "enemyHandMin", name: "敌方手牌下限", type: "number", default: 3, min: 0, max: 20, step: 1 },
+		{ key: "allyAttitudeMin", name: "队友态度下限", type: "number", default: 3, min: -10, max: 10, step: 0.1 },
+		{ key: "allyHpMin", name: "队友血量下限", type: "number", default: 2, min: 0, max: 10, step: 1 },
+		{ key: "allyGuessShownMin", name: "队友身份明置度下限", type: "number", default: 0.55, min: 0, max: 1, step: 0.05 },
+		{ key: "allyGuessConfidenceMin", name: "队友身份置信度下限", type: "number", default: 0.35, min: 0, max: 1, step: 0.05 },
+		{ key: "allyAttitudeMinIfGuessedFriendly", name: "若已猜为友方：队友态度下限", type: "number", default: -1.2, min: -10, max: 10, step: 0.1 },
+		{ key: "enemyGuessShownMin", name: "敌方身份明置度下限", type: "number", default: 0.65, min: 0, max: 1, step: 0.05 },
+		{ key: "enemyGuessConfidenceMin", name: "敌方身份置信度下限", type: "number", default: 0.35, min: 0, max: 1, step: 0.05 },
+		{ key: "enemyAttitudeMaxIfGuessedEnemy", name: "若已猜为敌方：敌方态度上限", type: "number", default: 1.0, min: -10, max: 10, step: 0.1 },
+		{ key: "ackWindowMs", name: "确认窗口(ms)", type: "number", default: 12000, min: 0, max: 300000, step: 100 },
+		{ key: "cooldownMs", name: "冷却(ms)", type: "number", default: 15000, min: 0, max: 600000, step: 100 },
+		{ key: "signalEmotion", name: "信号表情", type: "string", default: "flower" },
+		{ key: "autoAckInAIVsAI", name: "AI vs AI 自动确认", type: "boolean", default: true },
+		{ key: "autoAckDelayMs", name: "自动确认延迟(ms)", type: "number", default: 300, min: 0, max: 60000, step: 50 },
+		{ key: "enemyDamageEffectMin", name: "敌方伤害效果下限", type: "number", default: 0.6, min: -999, max: 999, step: 0.1 },
+		{ key: "allyDamageEffectMin", name: "队友伤害效果下限", type: "number", default: -0.8, min: -999, max: 999, step: 0.1 },
+	],
 };
 
 /**
@@ -1496,8 +1540,22 @@ export default function setup(ctx) {
 	if (!game || !hooks || !_status) return;
 	if (_status.connectMode) return;
 
+	const scriptCfg = (ctx && ctx.scriptConfig) || {};
+	if (scriptCfg.enabled !== true) return;
+
 	const runtime = getOrCreateRuntime(game);
 	if (!runtime) return;
+
+	// 将“脚本配置(⚙)”写入本局 runtime.cfg（仅覆盖 DEFAULT_CFG 中存在的字段）
+	try {
+		/** @type {Record<string, any>} */
+		const preset = {};
+		for (const k of Object.keys(DEFAULT_CFG)) {
+			if (Object.prototype.hasOwnProperty.call(scriptCfg, k)) preset[k] = scriptCfg[k];
+		}
+		applyCfgPresetToRuntime(runtime, preset);
+		if (scriptCfg.useDebugPresetLow === true) applyCfgPresetToRuntime(runtime, DEBUG_PRESET_LOW_CFG);
+	} catch (e) {}
 
 	if (game.__slqjAiPersona.chainElementalTeamplayInstalled) return;
 	installRuntimeApi(ctx);

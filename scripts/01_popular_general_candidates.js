@@ -5,7 +5,7 @@
  * - 开局时随机抽取 AI 玩家的一半进入“概率判定池”（不含人类玩家）
  * - 进入判定池后：每个玩家独立 {启用概率}% 概率启用热门/强势武将影响（否则完全不改动候选）
  *
- * 说明：通过包装 `game.chooseCharacter()` 及捕获 `game.createEvent('chooseCharacter')`
+ * 说明：通过包装 `game.createEvent()` 捕获 `game.createEvent('chooseCharacter')`
  * 取得事件对象，进而包装 `event.ai(player, list, list2, back)` 来重排/替换候选列表；
  * 不改动引擎的 AI 评估函数，仅影响“AI 在开局会选择哪些候选”。
  *
@@ -24,8 +24,40 @@ import { isLocalAIPlayer } from "../src/ai_persona/lib/utils.js";
  */
 export const slqjAiScriptMeta = {
 	name: "热门武将候选影响",
-	version: "1.0.4",
-	description: "影响开局 AI 选将候选列表：让热门/强势武将更容易进入候选并被选择（不会换入禁将/点绛唇AI禁用武将）。",
+	version: "1.0.6",
+	description:
+		"影响开局 AI 选将候选列表：让热门/强势武将更容易进入候选并被选择（不会换入禁将/仅点将可用/点绛唇AI禁用武将）。",
+};
+
+/**
+ * scripts 插件配置（用于“脚本插件管理 -> 配置(⚙)”）。
+ *
+ * @type {{version:1, items:Array<{key:string,name:string,type:"number",default:number,min:number,max:number,step:number,description?:string}>}}
+ */
+export const slqjAiScriptConfig = {
+	version: 1,
+	items: [
+		{
+			key: "enableProbability",
+			name: "启用概率",
+			type: "number",
+			default: 1,
+			min: 0,
+			max: 1,
+			step: 0.05,
+			description: "对进入判定池的 AI：每个玩家独立按该概率启用“热门候选影响”。",
+		},
+		{
+			key: "poolRatio",
+			name: "启用比例",
+			type: "number",
+			default: 0.5,
+			min: 0,
+			max: 1,
+			step: 0.05,
+			description: "开局随机抽取 AI 玩家中，进入“概率判定池”的比例（不含人类玩家）。",
+		},
+	],
 };
 
 const 启用概率 = 1;
@@ -43,6 +75,10 @@ export default function setupPopularGeneralCandidates(ctx) {
 	const logger = createLogger(lib);
 	logger.info("init");
 	patchCharacterReplaceRandomGetExact(lib, _status, logger);
+
+	const cfg = (ctx && ctx.scriptConfig) || {};
+	const enableProbability = typeof cfg.enableProbability === "number" ? cfg.enableProbability : 启用概率;
+	const poolRatio = typeof cfg.poolRatio === "number" ? cfg.poolRatio : 启用比例;
 
 	// 热门/强势武将 key（手工维护；不存在于当前环境时会自动跳过）
 	const POPULAR_KEYS = [
@@ -72,14 +108,16 @@ export default function setupPopularGeneralCandidates(ctx) {
 	} catch (e) { }
 	logger.info("popular keys:", popular.size);
 
+	const env = { game, lib, get, _status, popular, logger, enableProbability, poolRatio };
+
 	let tries = 0;
 	(function retry() {
 		// 部分环境下 characterReplace 初始化可能略晚；在重试期间兜底一次
 		patchCharacterReplaceRandomGetExact(lib, _status, logger);
-		if (wrapChooseCharacter({ game, lib, get, _status, popular, logger })) return;
+		if (wrapCreateEvent(env)) return;
 		tries++;
 		if (tries > 50) {
-			logger.warn("wrap game.chooseCharacter timeout");
+			logger.warn("wrap game.createEvent timeout");
 			return;
 		}
 		setTimeout(retry, 100);
@@ -87,53 +125,86 @@ export default function setupPopularGeneralCandidates(ctx) {
 }
 
 /**
- * @param {{game:any,lib:any,get:any,_status:any,popular:Set<string>,logger:any}} env
+ * @param {{game:any,lib:any,get:any,_status:any,popular:Set<string>,logger:any,enableProbability:number,poolRatio:number}} env
+ * @returns {boolean}
  */
-function wrapChooseCharacter(env) {
-	const originalChooseCharacter = env.game && env.game.chooseCharacter;
-	if (typeof originalChooseCharacter !== "function") return false;
-	if (originalChooseCharacter.__slqjAiPopularGeneralCandidatesWrapped) return true;
-	originalChooseCharacter.__slqjAiPopularGeneralCandidatesWrapped = true;
+function wrapCreateEvent(env) {
+	const game = env && env.game;
+	if (!game || typeof game.createEvent !== "function") return false;
+	if (game.createEvent.__slqjAiPopularGeneralCandidatesWrapped) return true;
 
-	env.game.chooseCharacter = function () {
-		// 确保在选将开始前已安装“严格全匹配”补丁（防止后加载的 characterReplace 条目漏补丁）
+	const originalCreateEvent = game.createEvent;
+	game.createEvent = function (name) {
+		const ev = originalCreateEvent.apply(this, arguments);
 		try {
-			patchCharacterReplaceRandomGetExact(env.lib, env._status, env.logger);
-		} catch (e) { }
+			if (name === "chooseCharacter") {
+				// 确保在选将开始前已安装“严格全匹配”补丁（防止后加载的 characterReplace 条目漏补丁）
+				try {
+					patchCharacterReplaceRandomGetExact(env.lib, env._status, env.logger);
+				} catch (e) { }
 
-		const originalCreateEvent = env.game && env.game.createEvent;
-		let capturedChooseCharacterEvent = null;
-		if (typeof originalCreateEvent === "function") {
-			env.game.createEvent = function (name) {
-				const ev = originalCreateEvent.apply(this, arguments);
-				if (name === "chooseCharacter") capturedChooseCharacterEvent = ev;
-				return ev;
-			};
+				queuePatchChooseCharacterEvent(ev, env);
+			}
+		} catch (e) {
+			env.logger && env.logger.warn && env.logger.warn("patch chooseCharacter event failed:", e);
 		}
+		return ev;
+	};
+	game.createEvent.__slqjAiPopularGeneralCandidatesWrapped = true;
+	game.createEvent.__slqjAiPopularGeneralCandidatesOriginal = originalCreateEvent;
+	env.logger && env.logger.info && env.logger.info("wrapped game.createEvent");
+	return true;
+}
 
-		let ret;
-		try {
-			ret = originalChooseCharacter.apply(this, arguments);
-		} finally {
-			if (env.game && env.game.createEvent !== originalCreateEvent) env.game.createEvent = originalCreateEvent;
-		}
+/**
+ * 在 `chooseCharacter` 事件对象上“尽快”安装 `ai` 包装器：
+ * - 不使用 `Object.defineProperty` 劫持 setter（避免与其他 scripts 冲突，如点绛唇 AI禁用脚本）
+ * - 采用“微任务 + 短轮询”方式，等待 `ev.ai` 出现后再包装
+ *
+ * @param {*} ev
+ * @param {{game:any,lib:any,get:any,_status:any,popular:Set<string>,logger:any,enableProbability:number,poolRatio:number}} env
+ * @returns {void}
+ */
+function queuePatchChooseCharacterEvent(ev, env) {
+	if (!ev || ev.__slqjAiPopularGeneralCandidatesPatchQueued) return;
+	ev.__slqjAiPopularGeneralCandidatesPatchQueued = true;
 
+	const tryPatch = () => {
 		try {
-			patchChooseCharacterEvent(ret || capturedChooseCharacterEvent, env);
+			patchChooseCharacterEvent(ev, env);
 		} catch (e) {
 			try {
 				console.error("[身临其境的AI][scripts] popular_general_candidates patch failed", e);
 			} catch (e2) { }
 		}
-		return ret;
 	};
-	env.logger.info("wrapped game.chooseCharacter");
-	return true;
+
+	// 微任务：让外层 createEvent 包装（如点绛唇）先完成安装，再尝试 patch
+	try {
+		Promise.resolve().then(tryPatch);
+	} catch (e) {
+		setTimeout(tryPatch, 0);
+	}
+
+	// 兜底：极少数情况下 ai 写入会更晚，做短轮询等待
+	let tries = 0;
+	const maxTries = 50;
+	(function poll() {
+		tries++;
+		if (!ev) return;
+		if (ev.__slqjAiPopularGeneralCandidatesPatched) return;
+		if (typeof ev.ai === "function") {
+			tryPatch();
+			if (ev.__slqjAiPopularGeneralCandidatesPatched) return;
+		}
+		if (tries >= maxTries) return;
+		setTimeout(poll, 0);
+	})();
 }
 
 /**
  * @param {*} ev
- * @param {{game:any,lib:any,get:any,_status:any,popular:Set<string>,logger:any}} env
+ * @param {{game:any,lib:any,get:any,_status:any,popular:Set<string>,logger:any,enableProbability:number,poolRatio:number}} env
  */
 function patchChooseCharacterEvent(ev, env) {
 	if (!ev || typeof ev.ai !== "function") return;
@@ -180,6 +251,11 @@ function patchChooseCharacterEvent(ev, env) {
 function getPopularBiasDecision(player, env) {
 	const game = env && env.game;
 	if (!game || !player) return { selectedForCheck: false, applyPopular: false };
+
+	const enableProbability =
+		typeof (env && env.enableProbability) === "number" ? env.enableProbability : 启用概率;
+	const poolRatio = typeof (env && env.poolRatio) === "number" ? env.poolRatio : 启用比例;
+
 	if (!game.__slqjAiPopularGeneralCandidatesBiasState) {
 		game.__slqjAiPopularGeneralCandidatesBiasState = {
 			/** @type {WeakMap<object, {selectedForCheck:boolean,applyPopular:boolean}>} */
@@ -198,7 +274,9 @@ function getPopularBiasDecision(player, env) {
 		try {
 			const all = Array.isArray(game.players) ? game.players.slice(0) : [];
 			const aiPlayers = all.filter((p) => isLocalAIPlayer(p, game, env?._status));
-			const pick = Math.floor(aiPlayers.length * 启用比例);
+			let pick = Math.floor(aiPlayers.length * poolRatio);
+			if (aiPlayers.length > 0 && poolRatio > 0 && pick === 0) pick = 1;
+			if (pick > aiPlayers.length) pick = aiPlayers.length;
 			for (let i = aiPlayers.length - 1; i > 0; i--) {
 				const j = Math.floor(Math.random() * (i + 1));
 				const tmp = aiPlayers[i];
@@ -220,7 +298,7 @@ function getPopularBiasDecision(player, env) {
 	} catch (e) {
 		selectedForCheck = Math.random() < 0.5;
 	}
-	const applyPopular = selectedForCheck && Math.random() < 启用概率;
+	const applyPopular = selectedForCheck && Math.random() < enableProbability;
 	const decision = { selectedForCheck, applyPopular };
 	state.map.set(player, decision);
 	try {
@@ -323,6 +401,76 @@ function isEngineCharacterDisabled(key, lib) {
 }
 
 /**
+ * 判断某武将是否属于当前模式的“禁将”范围。
+ *
+ * 说明：
+ * - 优先读取运行期 `lib.config.banned`（通常由引擎从 `${mode}_banned` 派生）
+ * - 兜底读取 `lib.config[mode + "_banned"]`（避免某些场景下 `banned` 未及时同步）
+ * - 同时兼容 `get.sourceCharacter(key)`（若存在）
+ *
+ * @param {*} key
+ * @param {*} lib
+ * @param {*} get
+ * @returns {boolean}
+ */
+function isModeBannedByConfig(key, lib, get) {
+	const name = getCandidateCharacterKey(key, get);
+	if (!name) return true;
+
+	/** @type {string[]} */
+	const variants = [name];
+	try {
+		if (get && typeof get.sourceCharacter === "function") {
+			const src = get.sourceCharacter(name);
+			if (src && src !== name) variants.push(src);
+		}
+	} catch (e) { }
+
+	for (const n of variants) {
+		try {
+			const banned = lib && lib.config && lib.config.banned;
+			if (Array.isArray(banned) && banned.includes(n)) return true;
+		} catch (e) { }
+		try {
+			const mode = lib && lib.config && lib.config.mode;
+			const list = mode ? lib.config[mode + "_banned"] : null;
+			if (Array.isArray(list) && list.includes(n)) return true;
+		} catch (e) { }
+	}
+	return false;
+}
+
+/**
+ * 判断某武将是否被标记为“仅点将可用”（不可被随机/AI 选到）。
+ *
+ * 说明：
+ * - 斗转星移等扩展会写入 `lib.config.forbidai_user`
+ * - 引擎启动时会把 `forbidai_user` 合并到 `lib.config.forbidai`，但运行期可能不同步
+ * - 同时兼容 `get.sourceCharacter(key)`（若存在）
+ *
+ * @param {*} key
+ * @param {*} lib
+ * @param {*} get
+ * @returns {boolean}
+ */
+function isForbidAiUserOnlyPoint(key, lib, get) {
+	const name = getCandidateCharacterKey(key, get);
+	if (!name) return true;
+	try {
+		const list = lib && lib.config && lib.config.forbidai_user;
+		if (Array.isArray(list) && list.includes(name)) return true;
+	} catch (e) { }
+	try {
+		if (get && typeof get.sourceCharacter === "function") {
+			const src = get.sourceCharacter(name);
+			const list = lib && lib.config && lib.config.forbidai_user;
+			if (src && Array.isArray(list) && list.includes(src)) return true;
+		}
+	} catch (e) { }
+	return false;
+}
+
+/**
  * 判断某武将是否属于点绛唇的【AI禁用】范围。
  *
  * 兼容：同时检查原 key 与 `get.sourceCharacter(key)`（若存在）。
@@ -350,7 +498,9 @@ function isDianjiangchunAiBanned(key, bannedSet, get) {
  * 判断某候选项是否“禁止出现在 AI 候选中”。
  *
  * 规则：
- * - 引擎禁将/禁用（含模式禁将、forbidai 等）
+ * - 模式禁将（`banned` / `${mode}_banned`）
+ * - 仅点将可用（`forbidai_user`）
+ * - 引擎禁用（`forbidai` / `isAiForbidden` 等）
  * - 点绛唇 AI禁用（仅当点绛唇启用且配置了列表时）
  *
  * @param {*} candidate
@@ -361,6 +511,8 @@ function isDianjiangchunAiBanned(key, bannedSet, get) {
 function isForbiddenCandidate(candidate, env, djcAiBanSet) {
 	const key = getCandidateCharacterKey(candidate, env && env.get);
 	if (!key) return true;
+	if (isModeBannedByConfig(key, env && env.lib, env && env.get)) return true;
+	if (isForbidAiUserOnlyPoint(key, env && env.lib, env && env.get)) return true;
 	if (isEngineCharacterDisabled(key, env && env.lib)) return true;
 	if (isDianjiangchunAiBanned(key, djcAiBanSet, env && env.get)) return true;
 	return false;

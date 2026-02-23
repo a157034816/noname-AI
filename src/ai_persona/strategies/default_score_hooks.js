@@ -1276,6 +1276,12 @@ function getFriendlyFireOpenPathContext(player, shaCard, game, get) {
 	if (get?.mode?.() === "identity") {
 		const zhu = game?.zhu;
 		if (zhu && ally === zhu) return empty;
+
+		// 身份局：主公绝不为“开路”去杀忠臣/明忠（主公击杀忠臣惩罚极大）。
+		const selfId = String(player?.identity || "");
+		const allyId = String(ally?.identity || "");
+		const isLord = (zhu && player === zhu) || selfId === "zhu" || player?.isZhu === true;
+		if (isLord && (allyId === "zhong" || allyId === "mingzhong")) return empty;
 	}
 
 	const enemy = getNextAlivePlayer(ally, game);

@@ -14,6 +14,20 @@ export const slqjAiScriptMeta = {
 		"仅当玩家使用界沮授（xin_jushou）时生效：从牌堆摸牌时以较高概率把诸葛连弩（zhuge）移到牌堆顶，从而“更容易摸到诸葛连弩”；若已持有诸葛连弩，则再次影响的概率会大幅降低。",
 };
 
+/**
+ * scripts 插件配置（用于“脚本插件管理 -> 配置(⚙)”）。
+ *
+ * @type {{version:1, items:Array<any>}}
+ */
+export const slqjAiScriptConfig = {
+	version: 1,
+	items: [
+		{ key: "chance", name: "基础触发概率", type: "number", default: 0.75, min: 0, max: 1, step: 0.05 },
+		{ key: "hasCardChanceFactor", name: "已持有时概率倍率", type: "number", default: 0.02, min: 0, max: 1, step: 0.01 },
+		{ key: "debug", name: "调试日志", type: "boolean", default: false },
+	],
+};
+
 const SKILL_NAME = "slqj_bonus_xin_jushou_zhuge_draw";
 const DEFAULT_CHANCE = 0.75;
 const DEFAULT_HAS_CARD_CHANCE_FACTOR = 0.02;
@@ -39,6 +53,16 @@ export default function setup(ctx) {
 	const runtime = getOrCreateRuntime(gameRef);
 	if (!runtime || runtime.installed) return;
 	runtime.installed = true;
+
+	// 将“脚本配置(⚙)”写入本局 runtime.cfg（仅影响本局）
+	try {
+		const sc = (ctx && ctx.scriptConfig) || {};
+		if (runtime.cfg && typeof runtime.cfg === "object") {
+			if (typeof sc.chance === "number") runtime.cfg.chance = sc.chance;
+			if (typeof sc.hasCardChanceFactor === "number") runtime.cfg.hasCardChanceFactor = sc.hasCardChanceFactor;
+			if (typeof sc.debug === "boolean") runtime.cfg.debug = sc.debug;
+		}
+	} catch (e) {}
 
 	if (!libRef.skill[SKILL_NAME]) {
 		libRef.skill[SKILL_NAME] = {

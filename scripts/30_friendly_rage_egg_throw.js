@@ -18,6 +18,58 @@ export const slqjAiScriptMeta = {
 };
 
 /**
+ * scripts 插件配置（用于“脚本插件管理 -> 配置(⚙)”）。
+ *
+ * @type {{version:1, items:Array<any>}}
+ */
+export const slqjAiScriptConfig = {
+	version: 1,
+	items: [
+		{ key: "stage1Threshold", name: "阶段1阈值", type: "number", default: 4, min: 0, max: 30, step: 1 },
+		{ key: "stage2Threshold", name: "阶段2阈值", type: "number", default: 7, min: 0, max: 60, step: 1 },
+		{ key: "hysteresis", name: "阈值滞回", type: "number", default: 0.6, min: 0, max: 10, step: 0.05 },
+
+		{ key: "burstIntervalMs", name: "连丢间隔(ms)", type: "number", default: 50, min: 0, max: 10000, step: 10 },
+		{ key: "stage2ShortMs", name: "阶段2短持续(ms)", type: "number", default: 2000, min: 0, max: 600000, step: 50 },
+		{ key: "stage2LongMs", name: "阶段2长持续(ms)", type: "number", default: 10000, min: 0, max: 600000, step: 50 },
+		{ key: "stage2ExtraPerRageMs", name: "怒气额外时长/点(ms)", type: "number", default: 250, min: 0, max: 60000, step: 10 },
+		{ key: "stage2ExtraCapMs", name: "怒气额外时长封顶(ms)", type: "number", default: 1500, min: 0, max: 600000, step: 50 },
+
+		{ key: "followupDelayTurnsMin", name: "追加连丢延迟回合(最小)", type: "number", default: 1, min: 0, max: 50, step: 1 },
+		{ key: "followupDelayTurnsMax", name: "追加连丢延迟回合(最大)", type: "number", default: 4, min: 0, max: 50, step: 1 },
+		{ key: "followupBurstMsMin", name: "追加连丢时长(最小ms)", type: "number", default: 2000, min: 0, max: 600000, step: 50 },
+		{ key: "followupBurstMsMax", name: "追加连丢时长(最大ms)", type: "number", default: 4500, min: 0, max: 600000, step: 50 },
+
+		{ key: "maxBurstTargets", name: "同屏连丢目标上限", type: "number", default: 2, min: 0, max: 10, step: 1 },
+
+		{ key: "retaliationEnable", name: "被砸蛋反击", type: "boolean", default: true },
+		{ key: "retaliationCooldownMs", name: "反击冷却(ms)", type: "number", default: 1400, min: 0, max: 600000, step: 50 },
+		{ key: "retaliationWindowMs", name: "反击窗口(ms)", type: "number", default: 2000, min: 0, max: 600000, step: 50 },
+		{ key: "retaliationBaseChance", name: "反击基础概率", type: "number", default: 0.35, min: 0, max: 1, step: 0.01 },
+		{ key: "retaliationExtraChancePerHit", name: "每次命中额外概率", type: "number", default: 0.18, min: 0, max: 1, step: 0.01 },
+		{ key: "retaliationMaxChance", name: "反击概率上限", type: "number", default: 0.95, min: 0, max: 1, step: 0.01 },
+		{ key: "retaliationMaxPerTurnPerTarget", name: "单回合单目标反击上限", type: "number", default: 2, min: 0, max: 20, step: 1 },
+		{ key: "retaliationSuppressMs", name: "反击 suppress(ms)", type: "number", default: 1200, min: 0, max: 600000, step: 50 },
+		{ key: "retaliationDelayMsMin", name: "反击延迟(最小ms)", type: "number", default: 120, min: 0, max: 600000, step: 10 },
+		{ key: "retaliationDelayMsMax", name: "反击延迟(最大ms)", type: "number", default: 360, min: 0, max: 600000, step: 10 },
+
+		{ key: "allowDeadThrow", name: "允许死亡也可扔", type: "boolean", default: true },
+		{ key: "allowDeadTarget", name: "允许死亡也可被扔", type: "boolean", default: true },
+
+		{ key: "instakillWarEnable", name: "首回合鸡蛋大战", type: "boolean", default: true },
+		{ key: "instakillWarChance", name: "鸡蛋大战触发概率", type: "number", default: 0.08, min: 0, max: 1, step: 0.01 },
+		{ key: "instakillWarPairMs", name: "鸡蛋大战持续(ms)", type: "number", default: 0, min: 0, max: 3600000, step: 1000 },
+		{ key: "instakillWarCooldownMs", name: "大战冷却(ms)", type: "number", default: 60, min: 0, max: 600000, step: 10 },
+		{ key: "instakillWarDelayMsMin", name: "大战延迟(最小ms)", type: "number", default: 80, min: 0, max: 600000, step: 10 },
+		{ key: "instakillWarDelayMsMax", name: "大战延迟(最大ms)", type: "number", default: 180, min: 0, max: 600000, step: 10 },
+		{ key: "instakillWarBurstMs", name: "大战单方面连砸(ms)", type: "number", default: 6500, min: 0, max: 600000, step: 50 },
+		{ key: "instakillWarBurstIntervalMs", name: "大战连砸间隔(ms)", type: "number", default: 180, min: 0, max: 10000, step: 10 },
+		{ key: "instakillWarAnnounce", name: "大战触发提示", type: "boolean", default: true },
+		{ key: "instakillWarOnlyOncePerGame", name: "每局最多触发一次大战", type: "boolean", default: true },
+	],
+};
+
+/**
  * 插件参数（可在脚本内调整）。
  *
  * 注意：本插件只影响“表情投掷”(throwEmotion)，不改变 AI 出牌/策略。
@@ -123,6 +175,29 @@ const CFG = {
 };
 
 /**
+ * 归一化配置：仅接受 CFG 中存在且类型一致的字段。
+ *
+ * @param {any} input
+ * @returns {typeof CFG}
+ */
+function normalizeCfg(input) {
+	/** @type {any} */
+	const patch = input && typeof input === "object" ? input : null;
+	/** @type {typeof CFG} */
+	const out = { ...CFG };
+	if (!patch) return out;
+
+	for (const [k, def] of Object.entries(CFG)) {
+		if (!Object.prototype.hasOwnProperty.call(patch, k)) continue;
+		const v = patch[k];
+		if (typeof v !== typeof def) continue;
+		if (typeof def === "number" && !Number.isFinite(v)) continue;
+		out[k] = v;
+	}
+	return out;
+}
+
+/**
  * scripts 插件入口：安装“怒气丢鸡蛋”逻辑。
  *
  * @param {SlqjAiScriptContext} ctx
@@ -137,6 +212,12 @@ export default function setupFriendlyRageEggThrow(ctx) {
 	if (!runtime || runtime.installed) return;
 	runtime.installed = true;
 	runtime._status = _status || runtime._status || null;
+
+	// 将“脚本配置(⚙)”写入本局 runtime.cfg（仅影响本局）
+	try {
+		const scriptCfg = (ctx && ctx.scriptConfig) || {};
+		runtime.cfg = normalizeCfg({ ...runtime.cfg, ...scriptCfg });
+	} catch (e) {}
 
 	installGlobalSkills({ game, lib });
 	installEmotionHook({ game, hooks });
@@ -170,7 +251,7 @@ function getOrCreateRuntime(game) {
 	if (typeof rt.instakillWarTriggered !== "boolean") rt.instakillWarTriggered = false;
 	if (typeof rt.hookInstalled !== "boolean") rt.hookInstalled = false;
 	if (typeof rt._status !== "object") rt._status = null;
-	rt.cfg = CFG;
+	rt.cfg = normalizeCfg(rt.cfg);
 	rt.api ??= createApi();
 	return rt;
 }

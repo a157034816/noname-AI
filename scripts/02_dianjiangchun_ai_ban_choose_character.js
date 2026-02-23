@@ -31,6 +31,24 @@ export const slqjAiScriptMeta = {
 	description: "检测点绛唇启用后，把 AI 禁将从 gameStart 提前到选将阶段：AI候选中若出现“AI禁用”武将则自动重抽替换，直到候选不含禁将。",
 };
 
+/**
+ * scripts 插件配置（用于“脚本插件管理 -> 配置(⚙)”）。
+ *
+ * @type {{version:1, items:Array<{key:string,name:string,type:"boolean",default:boolean,description?:string}>}}
+ */
+export const slqjAiScriptConfig = {
+	version: 1,
+	items: [
+		{
+			key: "verboseLog",
+			name: "详细日志",
+			type: "boolean",
+			default: false,
+			description: "开启后输出更详细的调试日志（也可通过 dev 或 slqj_ai_scripts_debug 触发）。",
+		},
+	],
+};
+
 export default function setupDianjiangchunAiBanChooseCharacter(ctx) {
 	const game = ctx && ctx.game;
 	const lib = ctx && ctx.lib;
@@ -40,7 +58,7 @@ export default function setupDianjiangchunAiBanChooseCharacter(ctx) {
 	if (game.__slqjAiDjcAiBanChooseCharacterInstalled) return;
 	game.__slqjAiDjcAiBanChooseCharacterInstalled = true;
 
-	const logger = createLogger(lib);
+	const logger = createLogger(lib, (ctx && ctx.scriptConfig) || null);
 	logger.info("init");
 
 	try {
@@ -443,11 +461,12 @@ function pickRandomReplacementIndex(pool, list, bannedSet, get, allowDuplicate) 
 
 /**
  * @param {*} lib
+ * @param {any} cfg
  * @returns {{isVerbose:boolean,info:Function,warn:Function,debug:Function}}
  */
-function createLogger(lib) {
+function createLogger(lib, cfg) {
 	const prefix = "[身临其境的AI][scripts][dianjiangchun_ai_ban_choose_character]";
-	const isVerbose = !!(lib && lib.config && (lib.config.dev || lib.config.slqj_ai_scripts_debug));
+	const isVerbose = !!(cfg && cfg.verboseLog) || !!(lib && lib.config && (lib.config.dev || lib.config.slqj_ai_scripts_debug));
 	function out(level, args) {
 		try {
 			const fn = console && console[level] ? console[level] : console.log;
