@@ -1,4 +1,11 @@
 import { listExtensionScriptFiles, normalizeScriptsRegistry, readScriptsRegistry, saveScriptsRegistry } from "./scripts_registry.js";
+import {
+  readScriptsConfig,
+  saveScriptsConfig,
+  normalizeScriptConfigSchema,
+  resolveScriptConfigValues,
+  computeScriptConfigOverrides,
+} from "./scripts_config.js";
 
 const ROOT_ID = "slqj-ai-scripts-manager-root";
 
@@ -42,6 +49,7 @@ export async function openScriptsPluginManagerModal(opts) {
   const listResult = await listExtensionScriptFiles({ baseUrl, game });
   const files = listResult.files || [];
   const initialRegistry = normalizeScriptsRegistry(files, readScriptsRegistry(config, lib));
+  let scriptsConfigStore = readScriptsConfig(config, lib);
 
   /** @type {string[]} */
   let order = initialRegistry.order.slice();
@@ -61,7 +69,9 @@ export async function openScriptsPluginManagerModal(opts) {
     return;
   }
 
-  const metaByFile = await loadScriptsMeta({ baseUrl, files });
+  const manifest = await loadScriptsManifest({ baseUrl, files });
+  const metaByFile = manifest.metaByFile;
+  const schemaByFile = manifest.schemaByFile;
 
   const toolbar = shell.shadow.querySelector("[data-slqj-ai-toolbar]");
   const listWrap = shell.shadow.querySelector("[data-slqj-ai-list]");
@@ -92,13 +102,488 @@ export async function openScriptsPluginManagerModal(opts) {
     renderList();
   });
 
-  addButton(footer, "保存并关闭", () => {
-    const normalized = normalizeScriptsRegistry(files, { version: 1, order, disabled });
-    const ok = saveScriptsRegistry(game, normalized);
-    shell.setStatus(ok ? "已保存：重启后生效" : "保存失败：请查看控制台");
-    if (ok) shell.close();
+  /** @type {boolean} */
+  let savingRegistry = false;
+  const saveRegistryBtn = addButton(footer, "保存并关闭", () => {
+    if (savingRegistry) return;
+    savingRegistry = true;
+    try {
+      saveRegistryBtn.disabled = true;
+      shell.setStatus("保存中...");
+    } catch (e) {}
+
+    (async () => {
+      const normalized = normalizeScriptsRegistry(files, { version: 1, order, disabled });
+      const ok = await saveScriptsRegistry(game, normalized);
+      shell.setStatus(ok ? "已保存：重启后生效" : "保存失败：请查看控制台");
+      if (ok) shell.close();
+    })()
+      .catch(() => {
+        shell.setStatus("保存失败：请查看控制台");
+      })
+      .finally(() => {
+        savingRegistry = false;
+        try {
+          saveRegistryBtn.disabled = false;
+        } catch (e) {}
+      });
   });
   addButton(footer, "取消", () => shell.close(), { variant: "ghost" });
+
+  const modalEl = shell.shadow.querySelector(".slqj-ai-modal");
+  const submodal = modalEl && modalEl instanceof HTMLElement ? createInlineSubmodal(modalEl) : null;
+
+  /**
+   * 打开某个脚本的“配置”二级弹窗。
+   *
+   * @param {string} file
+   * @returns {void}
+   */
+  function openScriptConfigSubmodal(file) {
+    if (!submodal) return;
+    const schema = schemaByFile && schemaByFile[file];
+    if (!schema || !Array.isArray(schema.items) || !schema.items.length) return;
+
+    const meta = metaByFile && metaByFile[file];
+    const titleText = meta && meta.name ? `脚本配置：${meta.name}` : `脚本配置：${String(file || "")}`;
+
+    const overrides =
+      scriptsConfigStore &&
+      scriptsConfigStore.overrides &&
+      typeof scriptsConfigStore.overrides === "object" &&
+      scriptsConfigStore.overrides[file] &&
+      typeof scriptsConfigStore.overrides[file] === "object"
+        ? scriptsConfigStore.overrides[file]
+        : null;
+
+    /** @type {Record<string, any>} */
+    let draft = resolveScriptConfigValues(schema, overrides);
+
+    submodal.setTitle(titleText);
+    submodal.setStatus("修改后通常需重启生效。");
+
+    const render = () => {
+      submodal.clearBody();
+      submodal.clearButtons();
+
+      const form = document.createElement("div");
+      form.className = "slqj-ai-form";
+      submodal.bodyEl.appendChild(form);
+
+      /** @type {Array<() => void>} */
+      const syncDraftFns = [];
+      /** @type {Set<string>} */
+      const invalidKeys = new Set();
+      /** @type {Set<string>} */
+      const adjustedKeys = new Set();
+      /** @type {Record<string, string>} */
+      const nameByKey = {};
+      /** @type {boolean} */
+      let adjustedConfirmArmed = false;
+
+      /**
+       * 把可能包含全角数字/中文标点/分隔符/单位的数字文本归一化为 JS Number 可解析的格式。
+       *
+       * 例：
+       * - `０．６` / `0。6` / `0·6` -> `0.6`
+       * - `0,6` / `0，6` / `,6` -> `0.6`
+       * - `1,234` / `1，234` -> `1234`
+       * - `1,234.5` -> `1234.5`
+       * - `50ms` -> `50`
+       *
+       * @param {string} raw
+       * @returns {string}
+       */
+      function normalizeNumberText(raw) {
+        const s = raw == null ? "" : String(raw);
+        let out = "";
+
+        for (let i = 0; i < s.length; i++) {
+          const ch = s[i];
+          const code = s.charCodeAt(i);
+
+          // 全角数字 ０-９
+          if (code >= 0xff10 && code <= 0xff19) {
+            out += String.fromCharCode(code - 0xff10 + 0x30);
+            continue;
+          }
+          // 全角正负号
+          if (code === 0xff0b) {
+            out += "+";
+            continue;
+          }
+          if (code === 0xff0d) {
+            out += "-";
+            continue;
+          }
+          // 兼容常见的 Unicode 减号/破折号
+          if (ch === "−" || ch === "–" || ch === "—") {
+            out += "-";
+            continue;
+          }
+          // 小数点（中文/全角/中点/部分键盘）
+          if (ch === "。" || ch === "．" || ch === "｡" || ch === "﹒" || ch === "·" || ch === "・" || ch === "∙" || ch === "•") {
+            out += ".";
+            continue;
+          }
+          // 逗号（中文/顿号）
+          if (ch === "，" || ch === "、") {
+            out += ",";
+            continue;
+          }
+          // 常见空白/分隔符：直接丢弃
+          if (
+            ch === " " ||
+            ch === "\t" ||
+            ch === "\n" ||
+            ch === "\r" ||
+            ch === "_" ||
+            ch === "\u00a0" ||
+            ch === "\u202f" ||
+            ch === "\u3000"
+          ) {
+            continue;
+          }
+          // 兼容全角 e/E（科学计数法）
+          if (ch === "ｅ" || ch === "Ｅ") {
+            out += "e";
+            continue;
+          }
+          // 仅保留数字解析相关字符，其余（单位/中文/字母等）剔除
+          if (
+            (ch >= "0" && ch <= "9") ||
+            ch === "+" ||
+            ch === "-" ||
+            ch === "." ||
+            ch === "," ||
+            ch === "e" ||
+            ch === "E"
+          ) {
+            out += ch;
+            continue;
+          }
+        }
+
+        out = out.trim();
+        if (!out) return "";
+
+        // 兼容以逗号开头的小数：`,6` / `-,6`
+        if (out[0] === ",") out = "0" + out;
+        if ((out.startsWith("-,") || out.startsWith("+,")) && out.length >= 2) out = out[0] + "0" + out.slice(1);
+
+        // 拆分科学计数法指数部分：只处理 mantissa 中的分隔符，避免干扰指数
+        let mantissa = out;
+        let exponent = "";
+        let eIndex = -1;
+        for (let i = 1; i < out.length; i++) {
+          const c = out[i];
+          if (c === "e" || c === "E") {
+            eIndex = i;
+            break;
+          }
+        }
+        if (eIndex > 0) {
+          mantissa = out.slice(0, eIndex);
+          exponent = out.slice(eIndex);
+          const m = exponent.match(/^([eE][+-]?\d+)/);
+          exponent = m ? m[1] : "";
+        }
+
+        // mantissa：处理逗号（千分位/小数逗号）
+        if (mantissa.includes(".")) {
+          mantissa = mantissa.replace(/,/g, "");
+        } else {
+          const commaCount = (mantissa.match(/,/g) || []).length;
+          if (commaCount === 1) {
+            const m = mantissa.match(/^([+-]?\d+),(\d+)$/);
+            if (m) {
+              const lhs = m[1];
+              const rhs = m[2];
+              const lhsDigits = lhs.replace(/^[+-]/, "");
+              // 仅当形如 1,234 / 12,345 才视为千分位；0,6 / 0,55 等视为小数
+              const isThousands = rhs.length === 3 && lhsDigits !== "0";
+              mantissa = isThousands ? lhs + rhs : lhs + "." + rhs;
+            } else {
+              mantissa = mantissa.replace(/,/g, "");
+            }
+          } else if (commaCount > 1) {
+            mantissa = mantissa.replace(/,/g, "");
+          }
+        }
+
+        return mantissa + exponent;
+      }
+
+      /**
+       * 尝试解析有限数值；失败返回 null。
+       *
+       * @param {string} raw
+       * @returns {number|null}
+       */
+      function tryParseFiniteNumber(raw) {
+        const normalized = normalizeNumberText(raw);
+        if (!normalized) return null;
+        const n = Number(normalized);
+        return Number.isFinite(n) ? n : null;
+      }
+
+      /**
+       * @param {number} value
+       * @param {number|undefined} min
+       * @param {number|undefined} max
+       * @returns {number}
+       */
+      function clampToRange(value, min, max) {
+        let v = typeof value === "number" && Number.isFinite(value) ? value : 0;
+        if (typeof min === "number" && Number.isFinite(min)) v = Math.max(v, min);
+        if (typeof max === "number" && Number.isFinite(max)) v = Math.min(v, max);
+        return v;
+      }
+
+      /**
+       * @param {number} a
+       * @param {number} b
+       * @returns {boolean}
+       */
+      function numberAlmostEqual(a, b) {
+        if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+        return Math.abs(a - b) <= 1e-9;
+      }
+
+      for (const item of schema.items) {
+        const row = document.createElement("div");
+        row.className = "slqj-ai-form-row";
+
+        const left = document.createElement("div");
+        left.className = "slqj-ai-form-left";
+
+        const name = document.createElement("div");
+        name.className = "slqj-ai-form-name";
+        name.textContent = String(item.name || item.key || "");
+        left.appendChild(name);
+
+        const descText = String(item.description || "").trim();
+        if (descText) {
+          const desc = document.createElement("div");
+          desc.className = "slqj-ai-form-desc";
+          desc.textContent = descText;
+          left.appendChild(desc);
+        }
+
+        const right = document.createElement("div");
+        right.className = "slqj-ai-form-right";
+
+        const key = String(item.key || "");
+        nameByKey[key] = String(item.name || item.key || key);
+        if (item.type === "boolean") {
+          const checked = !!draft[key];
+          right.appendChild(
+            createToggle(checked, (next) => {
+              adjustedConfirmArmed = false;
+              draft = { ...draft, [key]: !!next };
+            })
+          );
+        } else if (item.type === "number") {
+          const input = document.createElement("input");
+          input.className = "slqj-ai-input";
+          // NOTE: 不使用 type=number：部分输入法/全角符号/中文标点会被浏览器吞掉，导致最终保存值异常（看起来像“没保存”）
+          input.type = "text";
+          try {
+            // 仍尽量触发移动端数字键盘
+            // @ts-ignore
+            input.inputMode = "decimal";
+          } catch (e) {}
+          try {
+            input.autocomplete = "off";
+            input.spellcheck = false;
+          } catch (e) {}
+          input.value = draft[key] == null ? "" : String(draft[key]);
+
+          /**
+           * 同步数字输入框的当前值到 draft（含格式归一化与范围兜底）。
+           *
+           * 规则：
+           * - 空字符串：视为“恢复默认”（写入 null，后续会回退到 Schema 的 default，且不会落盘为覆盖值）
+           * - 非法数字：标记为 invalid（阻止保存）
+           * - 超出 min/max：写入夹取后的 number，并标记为 adjusted（本次保存会要求确认）
+           *
+           * @param {{writeBack?: boolean}=} [opts]
+           * @returns {void}
+           */
+          function syncNumberDraft(opts) {
+            const writeBack = !!(opts && opts.writeBack);
+            const raw = typeof input.value === "string" ? input.value : "";
+            const trimmed = raw.trim();
+
+            invalidKeys.delete(key);
+            adjustedKeys.delete(key);
+            if (writeBack) {
+              try {
+                input.classList.remove("is-invalid");
+                input.classList.remove("is-adjusted");
+              } catch (e) {}
+            }
+
+            if (!trimmed) {
+              draft = { ...draft, [key]: null };
+              return;
+            }
+            const parsed = tryParseFiniteNumber(trimmed);
+            if (parsed == null) {
+              invalidKeys.add(key);
+              if (writeBack) {
+                try {
+                  input.classList.add("is-invalid");
+                } catch (e) {}
+              }
+              return;
+            }
+
+            const min = typeof item.min === "number" ? item.min : undefined;
+            const max = typeof item.max === "number" ? item.max : undefined;
+            const clamped = clampToRange(parsed, min, max);
+            draft = { ...draft, [key]: clamped };
+
+            if (!numberAlmostEqual(clamped, parsed)) {
+              adjustedKeys.add(key);
+              if (writeBack) {
+                try {
+                  input.classList.add("is-adjusted");
+                } catch (e) {}
+              }
+            }
+          }
+
+          const syncNumberDraftSafeInput = () => {
+            try {
+              adjustedConfirmArmed = false;
+              syncNumberDraft({ writeBack: false });
+            } catch (e) {}
+          };
+          const syncNumberDraftSafeCommit = () => {
+            try {
+              syncNumberDraft({ writeBack: true });
+            } catch (e) {}
+          };
+
+          // iOS/部分 WebView 下仅 input 可能不稳定；这里多监听，并在保存前兜底同步一次
+          input.addEventListener("input", syncNumberDraftSafeInput);
+          input.addEventListener("change", syncNumberDraftSafeCommit);
+          input.addEventListener("blur", syncNumberDraftSafeCommit);
+          syncDraftFns.push(syncNumberDraftSafeCommit);
+          right.appendChild(input);
+        } else if (item.type === "select") {
+          const select = document.createElement("select");
+          select.className = "slqj-ai-select";
+          const options = Array.isArray(item.options) ? item.options : [];
+          for (const opt of options) {
+            const o = document.createElement("option");
+            o.value = String(opt?.value || "");
+            o.textContent = String(opt?.label || opt?.value || "");
+            select.appendChild(o);
+          }
+          select.value = draft[key] == null ? "" : String(draft[key]);
+          select.addEventListener("change", () => {
+            adjustedConfirmArmed = false;
+            draft = { ...draft, [key]: select.value };
+          });
+          right.appendChild(select);
+        } else {
+          const input = document.createElement("input");
+          input.className = "slqj-ai-input";
+          input.type = "text";
+          input.value = draft[key] == null ? "" : String(draft[key]);
+          input.addEventListener("input", () => {
+            adjustedConfirmArmed = false;
+            draft = { ...draft, [key]: input.value };
+          });
+          right.appendChild(input);
+        }
+
+        row.appendChild(left);
+        row.appendChild(right);
+        form.appendChild(row);
+      }
+
+      addButton(submodal.footerEl, "保存", () => {
+        // 先 blur：避免输入法还处于组合态导致 value 未最终落地
+        try {
+          const ae = typeof document !== "undefined" ? document.activeElement : null;
+          ae && typeof ae.blur === "function" && ae.blur();
+        } catch (e) {}
+
+        try {
+          for (const fn of syncDraftFns) {
+            try {
+              fn && fn();
+            } catch (e) {}
+          }
+        } catch (e) {}
+
+        if (invalidKeys.size) {
+          const names = Array.from(invalidKeys)
+            .map((k) => nameByKey[k] || k)
+            .filter(Boolean);
+          submodal.setStatus(`数字格式不合法：${names.join("、")}（未保存）`);
+          return;
+        }
+        if (adjustedKeys.size) {
+          const adjustedPairs = Array.from(adjustedKeys)
+            .map((k) => {
+              const nm = nameByKey[k] || k;
+              const v = draft && typeof draft === "object" ? draft[k] : undefined;
+              if (!nm) return "";
+              if (typeof v === "number" && Number.isFinite(v)) return `${nm}=${String(v)}`;
+              return nm;
+            })
+            .filter(Boolean);
+          if (!adjustedConfirmArmed) {
+            submodal.setStatus(
+              adjustedPairs.length
+                ? `部分数值超出范围，将保存为：${adjustedPairs.join("、")}（再次点击“保存”继续）`
+                : `部分数值超出范围将被自动调整（再次点击“保存”继续）`
+            );
+            adjustedConfirmArmed = true;
+            return;
+          }
+        } else {
+          adjustedConfirmArmed = false;
+        }
+
+        const perFile = computeScriptConfigOverrides(schema, draft);
+        const nextStore = {
+          version: 1,
+          overrides: {
+            ...(scriptsConfigStore && scriptsConfigStore.overrides && typeof scriptsConfigStore.overrides === "object" ? scriptsConfigStore.overrides : {}),
+          },
+        };
+        if (perFile && typeof perFile === "object" && Object.keys(perFile).length) nextStore.overrides[file] = perFile;
+        else delete nextStore.overrides[file];
+
+        submodal.setStatus("保存中...");
+        (async () => {
+          const ok = await saveScriptsConfig(game, nextStore);
+          submodal.setStatus(ok ? "已保存：重启后生效" : "保存失败：请查看控制台");
+          if (ok) {
+            scriptsConfigStore = nextStore;
+            submodal.close();
+          }
+        })().catch(() => {
+          submodal.setStatus("保存失败：请查看控制台");
+        });
+      });
+      addButton(submodal.footerEl, "恢复默认", () => {
+        adjustedConfirmArmed = false;
+        draft = resolveScriptConfigValues(schema, {});
+        submodal.setStatus("已恢复默认（未保存）");
+        render();
+      }, { variant: "ghost" });
+      addButton(submodal.footerEl, "关闭", () => submodal.close(), { variant: "ghost" });
+    };
+
+    submodal.open();
+    render();
+  }
 
   /**
    * 重新渲染插件列表（启用开关 + 上下移动）。
@@ -143,6 +628,13 @@ export async function openScriptsPluginManagerModal(opts) {
       const right = document.createElement("div");
       right.className = "slqj-ai-right";
 
+      const schema = schemaByFile && schemaByFile[file];
+      const hasConfig = !!(schema && Array.isArray(schema.items) && schema.items.length);
+      const cfgBtn = addIconButton(right, hasConfig ? "配置" : "无可配置项", "⚙", () => {
+        openScriptConfigSubmodal(file);
+      });
+      cfgBtn.disabled = !hasConfig;
+
       const up = addIconButton(right, "上移", "↑", () => {
         move(file, -1);
         renderList();
@@ -180,34 +672,39 @@ export async function openScriptsPluginManagerModal(opts) {
 }
 
 /**
- * 从脚本模块中读取元信息（不调用其入口函数）。
+ * 从脚本模块中读取元信息与配置 Schema（不调用其入口函数）。
  *
  * 说明：
- * - 约定脚本可导出 `slqjAiScriptMeta` 对象，供插件管理 UI 显示名称/版本/说明
- * - 若脚本未提供元信息或读取失败，则该脚本在 UI 中回退显示文件名
+ * - 元信息：`export const slqjAiScriptMeta = { name, version, description }`
+ * - 配置 Schema：`export const slqjAiScriptConfig = { version:1, items:[...] }`
+ * - 仅做 import + 读取导出对象，不会自动调用脚本入口函数
  *
  * @param {{baseUrl:string, files:string[]}} opts
- * @returns {Promise<Record<string, SlqjAiScriptMeta>>}
+ * @returns {Promise<{metaByFile: Record<string, SlqjAiScriptMeta>, schemaByFile: Record<string, any>}>}
  */
-async function loadScriptsMeta(opts) {
+async function loadScriptsManifest(opts) {
   const baseUrl = opts && opts.baseUrl ? String(opts.baseUrl) : "";
   const files = Array.isArray(opts?.files) ? opts.files.map((f) => String(f || "")).filter(Boolean) : [];
   const scriptsUrl = safeNewUrl("./scripts/", baseUrl);
-  if (!scriptsUrl) return {};
+  if (!scriptsUrl) return { metaByFile: {}, schemaByFile: {} };
 
   /** @type {Record<string, SlqjAiScriptMeta>} */
-  const out = {};
+  const metaByFile = {};
+  /** @type {Record<string, any>} */
+  const schemaByFile = {};
   await Promise.all(
     files.map(async (file) => {
       try {
         const modUrl = new URL(file, scriptsUrl);
         const mod = await import(modUrl.href);
         const meta = normalizeScriptMeta(mod && mod.slqjAiScriptMeta);
-        if (meta) out[file] = meta;
+        if (meta) metaByFile[file] = meta;
+        const schema = normalizeScriptConfigSchema(mod && mod.slqjAiScriptConfig);
+        if (schema) schemaByFile[file] = schema;
       } catch (e) {}
     })
   );
-  return out;
+  return { metaByFile, schemaByFile };
 }
 
 /**
@@ -627,6 +1124,168 @@ function createToggle(checked, onChange) {
 }
 
 /**
+ * 在主模态弹窗内部创建一个“二级模态”容器（用于脚本配置）。
+ *
+ * 说明：
+ * - 复用主弹窗的 Shadow DOM，不新建 createModalShell（避免 ESC 关闭两层）
+ * - 通过 capture 阶段拦截 ESC：二级弹窗打开时，按 ESC 仅关闭二级弹窗
+ *
+ * @param {HTMLElement} modal
+ * @returns {{
+ *  root: HTMLElement,
+ *  bodyEl: HTMLElement,
+ *  footerEl: HTMLElement,
+ *  open: () => void,
+ *  close: () => void,
+ *  setTitle: (text: string) => void,
+ *  setStatus: (text: string) => void,
+ *  clearBody: () => void,
+ *  clearButtons: () => void
+ * }}
+ */
+function createInlineSubmodal(modal) {
+  const root = document.createElement("div");
+  root.className = "slqj-ai-submodal";
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "slqj-ai-submodal-backdrop";
+
+  const panel = document.createElement("div");
+  panel.className = "slqj-ai-submodal-panel";
+
+  const header = document.createElement("div");
+  header.className = "slqj-ai-submodal-header";
+
+  const title = document.createElement("div");
+  title.className = "slqj-ai-submodal-title";
+  title.textContent = "";
+
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "slqj-ai-close slqj-ai-submodal-close";
+  closeBtn.setAttribute("aria-label", "关闭");
+  closeBtn.innerHTML = "×";
+
+  header.appendChild(title);
+  header.appendChild(closeBtn);
+
+  const body = document.createElement("div");
+  body.className = "slqj-ai-submodal-body";
+
+  const footer = document.createElement("div");
+  footer.className = "slqj-ai-footer slqj-ai-submodal-footer";
+
+  const status = document.createElement("div");
+  status.className = "slqj-ai-status";
+  status.textContent = "";
+
+  const footerBtns = document.createElement("div");
+  footerBtns.className = "slqj-ai-footer-buttons";
+
+  footer.appendChild(status);
+  footer.appendChild(footerBtns);
+
+  panel.appendChild(header);
+  panel.appendChild(body);
+  panel.appendChild(footer);
+
+  root.appendChild(backdrop);
+  root.appendChild(panel);
+
+  modal.appendChild(root);
+
+  let opened = false;
+  const stop = (e) => {
+    try {
+      e && e.stopPropagation && e.stopPropagation();
+    } catch (e) {}
+  };
+
+  const onKeyDownCapture = (e) => {
+    if (!opened) return;
+    if (!e) return;
+    if (e.key === "Escape") {
+      try {
+        e.preventDefault && e.preventDefault();
+        e.stopImmediatePropagation && e.stopImmediatePropagation();
+      } catch (e) {}
+      close();
+    }
+  };
+
+  /**
+   * @returns {void}
+   */
+  const open = () => {
+    if (opened) return;
+    opened = true;
+    try {
+      root.classList.add("is-open");
+    } catch (e) {}
+    try {
+      window.addEventListener("keydown", onKeyDownCapture, true);
+    } catch (e) {}
+  };
+
+  /**
+   * @returns {void}
+   */
+  const close = () => {
+    if (!opened) return;
+    opened = false;
+    try {
+      window.removeEventListener("keydown", onKeyDownCapture, true);
+    } catch (e) {}
+    try {
+      root.classList.remove("is-open");
+    } catch (e) {}
+  };
+
+  closeBtn.addEventListener("click", () => close());
+
+  backdrop.addEventListener("pointerdown", (e) => {
+    stop(e);
+    close();
+  });
+  backdrop.addEventListener("mousedown", (e) => {
+    stop(e);
+    close();
+  });
+  backdrop.addEventListener("touchstart", (e) => {
+    stop(e);
+    close();
+  }, { passive: true });
+
+  // 防止点击面板内部误触发“关闭”（保持二级弹窗为真正模态）
+  try {
+    panel.addEventListener("pointerdown", stop);
+    panel.addEventListener("mousedown", stop);
+    panel.addEventListener("touchstart", stop, { passive: true });
+    panel.addEventListener("click", stop);
+  } catch (e) {}
+
+  return {
+    root,
+    bodyEl: body,
+    footerEl: footer,
+    open,
+    close,
+    setTitle: (text) => {
+      title.textContent = String(text || "");
+    },
+    setStatus: (text) => {
+      status.textContent = String(text || "");
+    },
+    clearBody: () => {
+      body.innerHTML = "";
+    },
+    clearButtons: () => {
+      footerBtns.innerHTML = "";
+    },
+  };
+}
+
+/**
  * @returns {string}
  */
 function getCssText() {
@@ -675,6 +1334,118 @@ function getCssText() {
   z-index:1;
 }
 .slqj-ai-modal, .slqj-ai-modal *{ box-sizing: border-box; }
+.slqj-ai-submodal{
+  position:absolute;
+  inset:0;
+  display:none;
+  align-items:center;
+  justify-content:center;
+  z-index:3;
+}
+.slqj-ai-submodal.is-open{ display:flex; }
+.slqj-ai-submodal-backdrop{
+  position:absolute;
+  inset:0;
+  background:rgba(0,0,0,.55);
+}
+.slqj-ai-submodal-panel{
+  position:relative;
+  width:min(760px, 100%);
+  max-height:100%;
+  border-radius:14px;
+  background:rgba(20,22,26,.96);
+  color:#e9eef7;
+  box-shadow: 0 20px 60px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.10);
+  overflow:hidden;
+  display:grid;
+  grid-template-rows: auto 1fr auto;
+}
+.slqj-ai-submodal-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:14px 14px 10px 14px;
+}
+.slqj-ai-submodal-title{
+  font-size:15px;
+  font-weight:700;
+  letter-spacing:.2px;
+  min-width:0;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.slqj-ai-submodal-body{
+  padding:0 14px 14px 14px;
+  min-height:0;
+  overflow:auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+.slqj-ai-submodal-footer{
+  padding:12px 14px 14px 14px;
+}
+.slqj-ai-form{
+  border-radius:12px;
+  background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.07);
+  overflow:hidden;
+}
+.slqj-ai-form-row{
+  display:grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap:12px;
+  padding:12px;
+  border-bottom:1px solid rgba(255,255,255,.06);
+  align-items:center;
+}
+.slqj-ai-form-row:last-child{ border-bottom:none; }
+.slqj-ai-form-left{ min-width:0; }
+.slqj-ai-form-name{
+  font-size:13px;
+  font-weight:600;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.slqj-ai-form-desc{
+  font-size:12px;
+  opacity:.75;
+  margin-top:4px;
+  line-height:1.4;
+  white-space:normal;
+}
+.slqj-ai-form-right{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:8px;
+}
+.slqj-ai-input,.slqj-ai-select{
+  width:220px;
+  max-width:40vw;
+  border-radius:10px;
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(255,255,255,.06);
+  color:#e9eef7;
+  padding:8px 10px;
+  font-size:13px;
+}
+.slqj-ai-input:focus,.slqj-ai-select:focus{
+  outline:none;
+  border-color:rgba(100,170,255,.55);
+  box-shadow:0 0 0 2px rgba(100,170,255,.20);
+}
+.slqj-ai-input.is-invalid{
+  border-color:rgba(255,80,80,.70);
+  box-shadow:0 0 0 2px rgba(255,80,80,.18);
+}
+.slqj-ai-input.is-adjusted{
+  border-color:rgba(255,180,70,.70);
+  box-shadow:0 0 0 2px rgba(255,180,70,.18);
+}
+.slqj-ai-select{ cursor:pointer; }
 .slqj-ai-header{
   display:flex;
   align-items:center;

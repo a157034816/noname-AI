@@ -92,17 +92,41 @@ export function getScriptsLoadPlan(files, registry) {
 /**
  * 持久化注册表到配置（同时写入 extension_ 前缀与无前缀键，保持与本扩展其他配置项一致）。
  *
+ * 说明：
+ * - 兼容部分环境配置落盘为异步写入（IndexedDB）。若不等待写入完成就重启/刷新，可能导致保存丢失。
+ *
  * @param {*} game
  * @param {SlqjAiScriptsRegistryV1} registry
- * @returns {boolean}
+ * @returns {Promise<boolean>}
  */
-export function saveScriptsRegistry(game, registry) {
-  if (!game || typeof game.saveConfig !== "function") return false;
+export async function saveScriptsRegistry(game, registry) {
+  if (!game) return false;
   const payload = JSON.stringify(normalizeRegistryShape(registry));
+  const prefixedKey = `extension_${EXTENSION_NAME}_${CONFIG_KEY}`;
   try {
-    game.saveConfig(`extension_${EXTENSION_NAME}_${CONFIG_KEY}`, payload);
-    game.saveConfig(CONFIG_KEY, payload);
-    return true;
+    if (game.promises && typeof game.promises.saveConfig === "function") {
+      await game.promises.saveConfig(prefixedKey, payload);
+      await game.promises.saveConfig(CONFIG_KEY, payload);
+      return true;
+    }
+    if (typeof game.saveConfig === "function") {
+      await new Promise((resolve) => {
+        try {
+          game.saveConfig(prefixedKey, payload, undefined, resolve);
+        } catch (e) {
+          resolve();
+        }
+      });
+      await new Promise((resolve) => {
+        try {
+          game.saveConfig(CONFIG_KEY, payload, undefined, resolve);
+        } catch (e) {
+          resolve();
+        }
+      });
+      return true;
+    }
+    return false;
   } catch (e) {
     return false;
   }
