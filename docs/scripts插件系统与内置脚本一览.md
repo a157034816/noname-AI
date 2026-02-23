@@ -93,6 +93,8 @@
 - `lib, game, ui, get, ai, _status`
 - `config`：扩展配置对象（可能为 null）
 - `hooks`：HookBus（`game.slqjAiHooks` 或 `game.__slqjAiPersona.hooks`）
+- `scriptFile`：当前脚本文件名（例如 `01_xxx.js`）
+- `scriptConfig`：当前脚本生效配置（已合并默认值+用户覆盖；脚本未导出 Schema 时为空对象）
 
 > 推荐脚本优先使用 `ctx.hooks` 来注入规则，而不是直接 monkey patch 引擎函数。
 
@@ -127,6 +129,45 @@
 
 ---
 
+## 3.1 脚本配置：slqj_ai_scripts_config（参数持久化）
+
+新增：每个脚本可导出配置 Schema：`slqjAiScriptConfig`（v1），并由“脚本插件管理 -> 配置(⚙)”二级弹窗渲染与保存。
+
+Schema 示例：
+
+```js
+export const slqjAiScriptConfig = {
+  version: 1,
+  items: [
+    { key: "enabled", name: "启用", type: "boolean", default: false },
+    { key: "chance", name: "概率", type: "number", default: 0.5, min: 0, max: 1, step: 0.05 },
+    { key: "mode", name: "模式", type: "select", default: "A", options: [{ value: "A", label: "A" }, { value: "B", label: "B" }] },
+  ],
+};
+```
+
+保存键（JSON 字符串）：
+
+- `extension_身临其境的AI_slqj_ai_scripts_config`
+- `slqj_ai_scripts_config`
+
+保存结构（v1）只存“覆盖值”（`default` 不落盘，便于开发者更新默认值后自然生效）：
+
+```js
+{
+  version: 1,
+  overrides: {
+    "01_xxx.js": { chance: 0.8 }
+  }
+}
+```
+
+补充：在“脚本插件管理 -> 配置(⚙)”里，数字项会按 `number` 类型保存；清空数字输入框表示恢复默认值（不会写入 `overrides`）。
+
+加载器会把“生效配置值”（默认值 + 覆盖值 + 类型/范围兜底）注入到 `ctx.scriptConfig`。
+
+---
+
 ## 4) 管理 UI：脚本插件管理（模态对话框）
 
 入口：`src/scripts_manager_modal.js -> openScriptsPluginManagerModal(opts)`
@@ -136,6 +177,7 @@
 - 单实例：重复打开会先关闭旧实例
 - 显示每个脚本的：
   - 启用开关
+  - 配置(⚙)：打开二级弹窗（配置项由脚本导出）
   - 上移/下移调整顺序
   - 标题/说明（若脚本提供 meta）
 - 工具栏：
@@ -194,6 +236,95 @@ HookBus 支持 `priority`（越大越先执行）：
 ## 6) 内置脚本逐个拆解
 
 > 说明：以下脚本位于本扩展根目录 `scripts/`，会被加载器按顺序加载（可在管理 UI 调整）。
+
+### 6.0 内置脚本配置项速查（⚙）
+
+说明：默认值来自各脚本导出的 `slqjAiScriptConfig`；配置保存到 `slqj_ai_scripts_config`（仅保存覆盖值）。
+
+- `01_popular_general_candidates.js`
+  - `enableProbability`: `1`
+  - `poolRatio`: `0.5`
+- `02_dianjiangchun_ai_ban_choose_character.js`
+  - `verboseLog`: `false`
+- `10_chain_elemental_teamplay.js`（默认关闭）
+  - `enabled`: `false`
+  - `useDebugPresetLow`: `false`
+  - `enemyHandMin`: `3`
+  - `allyAttitudeMin`: `3`
+  - `allyHpMin`: `2`
+  - `allyGuessShownMin`: `0.55`
+  - `allyGuessConfidenceMin`: `0.35`
+  - `allyAttitudeMinIfGuessedFriendly`: `-1.2`
+  - `enemyGuessShownMin`: `0.65`
+  - `enemyGuessConfidenceMin`: `0.35`
+  - `enemyAttitudeMaxIfGuessedEnemy`: `1.0`
+  - `ackWindowMs`: `12000`
+  - `cooldownMs`: `15000`
+  - `signalEmotion`: `"flower"`
+  - `autoAckInAIVsAI`: `true`
+  - `autoAckDelayMs`: `300`
+  - `enemyDamageEffectMin`: `0.6`
+  - `allyDamageEffectMin`: `-0.8`
+- `20_peixiu_takeover.js`
+  - `enableGreedyLookahead`: `true`
+  - `greedyLookaheadMode`: `"A"`
+  - `hookPriority`: `1`
+  - `debug`: `false`
+  - `disableBuiltinNoise`: `true`
+  - `enableJuezhiPick`: `true`
+  - `divisorBonus`: `1.0`
+  - `multipleBonus`: `0.45`
+  - `breakPenalty`: `0.6`
+  - `smallMarkMultipleExtra`: `0.35`
+- `21_wu_zhugeliang_takeover.js`
+  - `hookPriority`: `1`
+  - `debug`: `false`
+- `22_xin_jushou_zhuge_bonus.js`
+  - `chance`: `0.75`
+  - `hasCardChanceFactor`: `0.02`
+  - `debug`: `false`
+- `23_xin_jushou_jianying_ai.js`
+  - `hookPriority`: `2`
+  - `debug`: `false`
+  - `matchBonus`: `2.4`
+  - `setupBonus`: `0.8`
+  - `badMetaPenalty`: `0.6`
+- `30_friendly_rage_egg_throw.js`
+  - `stage1Threshold`: `4`
+  - `stage2Threshold`: `7`
+  - `hysteresis`: `0.6`
+  - `burstIntervalMs`: `50`
+  - `stage2ShortMs`: `2000`
+  - `stage2LongMs`: `10000`
+  - `stage2ExtraPerRageMs`: `250`
+  - `stage2ExtraCapMs`: `1500`
+  - `followupDelayTurnsMin`: `1`
+  - `followupDelayTurnsMax`: `4`
+  - `followupBurstMsMin`: `2000`
+  - `followupBurstMsMax`: `4500`
+  - `maxBurstTargets`: `2`
+  - `retaliationEnable`: `true`
+  - `retaliationCooldownMs`: `1400`
+  - `retaliationWindowMs`: `2000`
+  - `retaliationBaseChance`: `0.35`
+  - `retaliationExtraChancePerHit`: `0.18`
+  - `retaliationMaxChance`: `0.95`
+  - `retaliationMaxPerTurnPerTarget`: `2`
+  - `retaliationSuppressMs`: `1200`
+  - `retaliationDelayMsMin`: `120`
+  - `retaliationDelayMsMax`: `360`
+  - `allowDeadThrow`: `true`
+  - `allowDeadTarget`: `true`
+  - `instakillWarEnable`: `true`
+  - `instakillWarChance`: `0.08`
+  - `instakillWarPairMs`: `0`
+  - `instakillWarCooldownMs`: `60`
+  - `instakillWarDelayMsMin`: `80`
+  - `instakillWarDelayMsMax`: `180`
+  - `instakillWarBurstMs`: `6500`
+  - `instakillWarBurstIntervalMs`: `180`
+  - `instakillWarAnnounce`: `true`
+  - `instakillWarOnlyOncePerGame`: `true`
 
 ---
 
