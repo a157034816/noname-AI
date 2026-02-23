@@ -11,6 +11,7 @@
  */
 
 import { listExtensionScriptFiles, readScriptsRegistry, getScriptsLoadPlan } from "./scripts_registry.js";
+import { get as getLogger } from "./logger/manager.js";
 
 /**
  * scripts 插件模块的“约定入口”集合。
@@ -48,6 +49,7 @@ export async function loadExtensionScripts(opts) {
   const game = opts ? opts.game : null;
   const lib = opts ? opts.lib : null;
   const config = opts ? opts.config : null;
+  const logger = getLogger("console");
 
   const enable = config?.slqj_ai_scripts_enable ?? lib?.config?.slqj_ai_scripts_enable ?? true;
   if (!enable) return { loaded: [], failed: [], skipped: true };
@@ -55,7 +57,7 @@ export async function loadExtensionScripts(opts) {
   const listResult = await listExtensionScriptFiles({ baseUrl, game });
   if (listResult.skipped) {
     try {
-      console.warn("[身临其境的AI][scripts] skip (" + String(listResult.reason || "unknown") + ")");
+      logger.warn("scripts", "skip (" + String(listResult.reason || "unknown") + ")");
     } catch (e) {}
     return { loaded: [], failed: [], skipped: true };
   }
@@ -96,7 +98,7 @@ export async function loadExtensionScripts(opts) {
     } catch (e) {
       failed.push({ file, error: e });
       try {
-        console.error("[身临其境的AI][scripts] load failed:", file, e);
+        logger.error("scripts", "load failed:", file, e);
       } catch (e2) {}
     }
   }
