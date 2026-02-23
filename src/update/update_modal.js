@@ -1,7 +1,11 @@
 import { createModalShell } from "../scripts_manager_modal.js";
 import { canWriteFiles } from "./node_env.js";
-import { checkForUpdate, downloadAndApplyUpdate } from "./updater.js";
+import { checkForUpdate, downloadAndApplyUpdate, fetchReleaseNotesBetweenVersions } from "./updater.js";
 import { SLQJ_AI_UPDATE_REPO } from "../version.js";
+
+/**
+ * @typedef {{version:string, tagName:string, title:string, body:string, htmlUrl:string, publishedAt:string}} SlqjAiReleaseNote
+ */
 
 /**
  * 打开“检查更新/一键更新”弹窗。
@@ -16,7 +20,7 @@ export async function openUpdateModal(opts) {
   if (!baseUrl || !currentVersion) return;
 
   const shell = createModalShell({
-    title: "扩展更新",
+    title: "身临其境的AI-扩展更新",
     subtitle: "从 GitHub Releases 检查新版本；下载并覆盖更新后需重启生效。",
     ui: opts?.ui,
   });
@@ -26,12 +30,47 @@ export async function openUpdateModal(opts) {
   const footer = shell.shadow.querySelector("[data-slqj-ai-footer]");
   if (!toolbar || !listWrap || !footer) return;
 
+  /**
+   * @param {Record<string, any>} patch
+   * @returns {void}
+   */
+  const mergeGameUpdateState = (patch) => {
+    try {
+      if (!game) return;
+      const prev = game.__slqjAiUpdateState;
+      const base = prev && typeof prev === "object" ? prev : {};
+      game.__slqjAiUpdateState = Object.assign({}, base, patch);
+    } catch (e) {}
+  };
+
+  /**
+   * @param {string} key
+   * @returns {{notes: SlqjAiReleaseNote[], warning: string}|null}
+   */
+  const readCachedNotes = (key) => {
+    try {
+      if (!game) return null;
+      const s = game.__slqjAiUpdateState;
+      if (!s || typeof s !== "object") return null;
+      if (String(s.releaseNotesKey || "") !== String(key || "")) return null;
+      if (!Array.isArray(s.releaseNotes)) return null;
+      return { notes: /** @type {SlqjAiReleaseNote[]} */ (s.releaseNotes), warning: String(s.releaseNotesWarning || "") };
+    } catch (e) {
+      return null;
+    }
+  };
+
   const state = {
     writable: false,
     checking: false,
     updating: false,
     confirmUntil: 0,
     lastCheck: /** @type {any} */ (null),
+    notesLoading: false,
+    notesKey: "",
+    notesError: "",
+    notesWarning: "",
+    releaseNotes: /** @type {SlqjAiReleaseNote[]|null} */ (null),
   };
 
   state.writable = await canWriteFiles({ game });
@@ -41,7 +80,7 @@ export async function openUpdateModal(opts) {
   if (initialCheck) {
     state.lastCheck = initialCheck;
     try {
-      if (game) game.__slqjAiUpdateState = { checkedAt: Date.now(), ...initialCheck };
+      mergeGameUpdateState({ checkedAt: Date.now(), ...initialCheck });
     } catch (e) {}
     if (initialCheck.ok) {
       shell.setStatus(initialCheck.updateAvailable ? "发现新版本：可点击“下载并更新”" : "已是最新版本");
@@ -71,6 +110,102 @@ export async function openUpdateModal(opts) {
   btnUpdate.disabled = true;
   addButton(footer, "关闭", () => shell.close(), { variant: "ghost" });
 
+  /**
+   * @param {string} iso
+   * @returns {string}
+   */
+  const formatDate = (iso) => {
+    const raw = String(iso || "").trim();
+    if (!raw) return "";
+    // GitHub published_at 为 ISO 字符串，这里仅展示日期部分即可。
+    return raw.length >= 10 ? raw.slice(0, 10) : raw;
+  };
+
+  const clearNotes = () => {
+    state.notesLoading = false;
+    state.notesKey = "";
+    state.notesError = "";
+    state.notesWarning = "";
+    state.releaseNotes = null;
+  };
+
+  /**
+   * 拉取并渲染“更新内容”（从当前版本到 latest 的 release body）。
+   *
+   * @returns {void}
+   */
+  const kickNotesFetch = () => {
+    try {
+      if (state.notesLoading) return;
+      const r = state.lastCheck;
+      if (!r || !r.ok) {
+        clearNotes();
+        return;
+      }
+      if (!r.updateAvailable) {
+        clearNotes();
+        render();
+        return;
+      }
+
+      const key = `${String(r.currentVersion || "").trim()}->${String(r.latestTag || r.latestVersion || "").trim()}`;
+      if (!key) return;
+
+      // 若 key 未变化且已有结果，则不重复请求。
+      if (state.notesKey === key && (state.releaseNotes || state.notesError)) return;
+      state.notesKey = key;
+
+      const cached = readCachedNotes(key);
+      if (cached) {
+        state.notesLoading = false;
+        state.notesError = "";
+        state.notesWarning = String(cached.warning || "");
+        state.releaseNotes = cached.notes;
+        render();
+        return;
+      }
+
+      state.notesLoading = true;
+      state.notesError = "";
+      state.notesWarning = "";
+      state.releaseNotes = null;
+      render();
+
+      fetchReleaseNotesBetweenVersions({ currentVersion: r.currentVersion, latestVersion: r.latestVersion, latestTag: r.latestTag })
+        .then((res) => {
+          state.notesLoading = false;
+          if (!res || !res.ok) {
+            state.notesError = String((res && res.error) || "unknown");
+            state.notesWarning = "";
+            state.releaseNotes = null;
+            render();
+            return;
+          }
+          state.notesError = "";
+          state.notesWarning = String(res.warning || "");
+          state.releaseNotes = Array.isArray(res.notes) ? res.notes : [];
+
+          try {
+            mergeGameUpdateState({
+              releaseNotesKey: key,
+              releaseNotes: state.releaseNotes,
+              releaseNotesWarning: state.notesWarning,
+              releaseNotesFetchedAt: Date.now(),
+            });
+          } catch (e) {}
+
+          render();
+        })
+        .catch((e) => {
+          state.notesLoading = false;
+          state.notesError = String(e && e.message ? e.message : e) || "unknown";
+          state.notesWarning = "";
+          state.releaseNotes = null;
+          render();
+        });
+    } catch (e) {}
+  };
+
   const render = () => {
     info.innerHTML = "";
     appendLine(info, `当前版本：${currentVersion}`);
@@ -94,6 +229,88 @@ export async function openUpdateModal(opts) {
       appendLine(info, `发布页：${state.lastCheck.htmlUrl || ""}`);
     }
 
+    // —— 更新内容 ——
+    try {
+      const notesWrap = document.createElement("div");
+      notesWrap.style.marginTop = "12px";
+
+      const header = document.createElement("div");
+      header.style.fontWeight = "600";
+      header.style.opacity = "0.95";
+      header.textContent = state.lastCheck?.ok
+        ? `更新内容（${currentVersion} -> ${String(state.lastCheck.latestVersion || "").trim() || "latest"}）`
+        : "更新内容";
+      notesWrap.appendChild(header);
+
+      const addMsg = (text) => {
+        const el = document.createElement("div");
+        el.textContent = String(text || "");
+        el.style.marginTop = "6px";
+        el.style.opacity = "0.9";
+        notesWrap.appendChild(el);
+      };
+
+      if (!state.lastCheck) {
+        addMsg("（检查更新后显示）");
+      } else if (!state.lastCheck.ok) {
+        addMsg("（检查失败，无法获取更新内容）");
+      } else if (!state.lastCheck.updateAvailable) {
+        addMsg("无（已是最新版本）");
+      } else if (state.notesLoading) {
+        addMsg("正在获取更新内容…");
+      } else if (state.notesError) {
+        addMsg(`更新内容获取失败（${state.notesError}）`);
+      } else if (!state.releaseNotes) {
+        addMsg("（待加载）");
+      } else if (!state.releaseNotes.length) {
+        addMsg("无（release 未提供更新说明或未命中区间）");
+      } else {
+        if (state.notesWarning) {
+          const w = document.createElement("div");
+          w.textContent = String(state.notesWarning || "");
+          w.style.marginTop = "6px";
+          w.style.opacity = "0.85";
+          notesWrap.appendChild(w);
+        }
+
+        const list = state.releaseNotes;
+        for (let i = 0; i < list.length; i++) {
+          const n = list[i];
+          const ver = String(n?.version || "").trim();
+          const tag = String(n?.tagName || "").trim();
+          const title = String(n?.title || "").trim();
+          const date = formatDate(n?.publishedAt);
+
+          const details = document.createElement("details");
+          details.open = i === list.length - 1;
+          details.style.marginTop = "8px";
+          details.style.border = "1px solid rgba(255,255,255,.10)";
+          details.style.borderRadius = "12px";
+          details.style.padding = "8px 10px";
+          details.style.background = "rgba(255,255,255,.03)";
+
+          const summary = document.createElement("summary");
+          summary.style.cursor = "pointer";
+          summary.style.userSelect = "text";
+          summary.textContent = `${ver ? "v" + ver : tag || "release"}${tag ? `（tag: ${tag}）` : ""}${date ? `  ${date}` : ""}${title ? `  ${title}` : ""}`;
+          details.appendChild(summary);
+
+          const body = document.createElement("div");
+          body.style.whiteSpace = "pre-wrap";
+          body.style.wordBreak = "break-word";
+          body.style.marginTop = "8px";
+          body.style.fontSize = "12px";
+          body.style.opacity = "0.92";
+          body.textContent = String(n?.body || "").trim() || "（该版本未提供更新说明）";
+          details.appendChild(body);
+
+          notesWrap.appendChild(details);
+        }
+      }
+
+      info.appendChild(notesWrap);
+    } catch (e) {}
+
     btnUpdate.disabled = !state.writable || !state.lastCheck?.ok || !state.lastCheck.updateAvailable || state.updating;
     btnCheck.disabled = state.checking || state.updating;
     btnOpenRelease.disabled = false;
@@ -107,7 +324,7 @@ export async function openUpdateModal(opts) {
     const result = await checkForUpdate({ currentVersion });
     state.lastCheck = result;
     try {
-      if (game) game.__slqjAiUpdateState = { checkedAt: Date.now(), ...result };
+      mergeGameUpdateState({ checkedAt: Date.now(), ...result });
     } catch (e) {}
     if (result.ok) {
       shell.setStatus(result.updateAvailable ? "发现新版本：可点击“下载并更新”" : "已是最新版本");
@@ -116,6 +333,7 @@ export async function openUpdateModal(opts) {
     }
     state.checking = false;
     render();
+    kickNotesFetch();
   };
 
   const doUpdate = async () => {
@@ -163,6 +381,7 @@ export async function openUpdateModal(opts) {
   };
 
   render();
+  kickNotesFetch();
 
   // 打开弹窗后自动检查一次（不自动更新）
   try {
