@@ -137,6 +137,7 @@ export {};
  *  slqj_ai_persona_enable_camouflage?: boolean,
  *  slqj_ai_scripts_enable?: boolean,
  *  slqj_ai_scripts_registry?: (string|object),
+ *  slqj_ai_scripts_config?: (string|object),
  *  slqj_ai_scripts_debug?: boolean
  * }} SlqjAiExtensionConfig
  */ 
