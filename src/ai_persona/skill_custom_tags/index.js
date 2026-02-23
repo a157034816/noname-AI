@@ -14,6 +14,7 @@
 import { SkillCustomTagStore } from "./store.js";
 import { SkillTagProcessorFramework } from "./framework.js";
 import { createBuiltinSkillTagTextProcessors } from "./processors/index.js";
+import { get as getLogger } from "../../logger/manager.js";
 
 export function installSkillCustomTags(ctx) {
 	const game = ctx && ctx.game;
@@ -128,7 +129,8 @@ function runForSkillIds(args) {
 	} catch (e) {}
 
 	if (logger && logger.isVerbose) {
-		logger.info(
+		logger.log(
+			"runForSkillIds",
 			"%s; scanned=%d tagged=%d applied=%d missing=%d skippedExisting=%d",
 			reason || "run",
 			scanReport.scanned,
@@ -138,7 +140,7 @@ function runForSkillIds(args) {
 			report.skippedExisting.length
 		);
 		if (report.missingSkills.length) {
-			logger.warn("missing skills:", report.missingSkills);
+			logger.warn("runForSkillIds", "missing skills:", report.missingSkills);
 		}
 	}
 }
@@ -274,45 +276,30 @@ function ensureSkill(lib, name, def) {
 
 /**
  * @param {*} lib
- * @returns {{isVerbose:boolean, info:(...args:any[])=>void, warn:(...args:any[])=>void, debug:(...args:any[])=>void}}
+ * @returns {{isVerbose:boolean, log:(feature:any, ...args:any[])=>void, warn:(feature:any, ...args:any[])=>void, debug:(feature:any, ...args:any[])=>void}}
  */
 function createLogger(lib) {
-	const prefix = "[身临其境的AI][core][skill_custom_tags]";
 	const isVerbose = !!(lib && lib.config && lib.config.dev);
-	/**
-	 * 输出日志（自动补全 prefix）。
-	 *
-	 * 注意：当首参为 string 时，将 prefix 合并进 format string，
-	 * 以确保 console 的 `%s/%d` 等占位符能正常格式化。
-	 *
-	 * @param {"log"|"warn"|"error"} level
-	 * @param {any[]} args
-	 * @returns {void}
-	 */
-	function out(level, args) {
-		try {
-			const fn = console && console[level] ? console[level] : console.log;
-			if (!args || !args.length) {
-				fn.call(console, prefix);
-				return;
-			}
-			if (typeof args[0] === "string") {
-				fn.apply(console, [prefix + " " + args[0]].concat(args.slice(1)));
-				return;
-			}
-			fn.apply(console, [prefix].concat(args));
-		} catch (e) {}
-	}
+	const base = getLogger("console");
+
+	const normalizeSubFeature = (f) => String(f == null ? "" : f).trim();
+
+	const mergeArgs = (subFeature, args) => {
+		const sf = normalizeSubFeature(subFeature);
+		const rest = Array.isArray(args) ? args : [];
+		if (!sf) return rest;
+		if (!rest.length) return [`[${sf}]`];
+		if (typeof rest[0] === "string") return [`[${sf}] ${rest[0]}`].concat(rest.slice(1));
+		return [`[${sf}]`].concat(rest);
+	};
+
 	return {
 		isVerbose,
-		info: function () {
-			out("log", Array.from(arguments));
-		},
-		warn: function () {
-			out("warn", Array.from(arguments));
-		},
-		debug: function () {
-			if (isVerbose) out("log", ["[debug]"].concat(Array.from(arguments)));
+		log: (feature, ...args) => base.log("skill_custom_tags", ...mergeArgs(feature, args)),
+		warn: (feature, ...args) => base.warn("skill_custom_tags", ...mergeArgs(feature, args)),
+		debug: (feature, ...args) => {
+			if (!isVerbose) return;
+			base.debug("skill_custom_tags", ...mergeArgs(feature, args));
 		},
 	};
 }

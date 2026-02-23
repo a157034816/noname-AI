@@ -46,7 +46,7 @@
 
 export class SkillTagProcessorFramework {
 	/**
-	 * @param {{logger?: {info?:(...args:any[])=>void, warn?:(...args:any[])=>void, debug?:(...args:any[])=>void}}} [opts]
+	 * @param {{logger?: {log?:(feature:any, ...args:any[])=>void, warn?:(feature:any, ...args:any[])=>void, debug?:(feature:any, ...args:any[])=>void}}} [opts]
 	 */
 	constructor(opts) {
 		/** @type {SkillTagTextProcessor[]} */
@@ -210,7 +210,7 @@ function runOnEntries(args) {
 				tags = p.process(input) || null;
 			} catch (e) {
 				try {
-					logger && logger.warn && logger.warn("processor failed:", pid, entry.skillId, e);
+					logger && logger.warn && logger.warn("processor", "failed:", pid, entry.skillId, e);
 				} catch (e2) {}
 				continue;
 			}

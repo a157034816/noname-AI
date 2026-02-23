@@ -1,4 +1,5 @@
 import { checkForUpdate } from "./updater.js";
+import { get as getLogger } from "../logger/manager.js";
 
 const LAST_CHECK_KEY = "slqj_ai_update_last_check_ts";
 
@@ -12,6 +13,7 @@ export async function maybeAutoCheckForUpdates(opts) {
   const game = opts?.game;
   const lib = opts?.lib;
   const config = opts?.config;
+  const logger = getLogger("console");
 
   const connectMode = !!opts?.connectMode;
   if (connectMode) return null;
@@ -50,8 +52,9 @@ export async function maybeAutoCheckForUpdates(opts) {
 
   try {
     if (result && result.ok && result.updateAvailable) {
-      console.warn(
-        `[身临其境的AI][update] 发现新版本：${result.currentVersion} -> ${result.latestVersion}（在扩展设置中点击“检查更新/更新”）`
+      logger.warn(
+        "update",
+        `发现新版本：${result.currentVersion} -> ${result.latestVersion}（在扩展设置中点击“检查更新/更新”）`
       );
     }
   } catch (e) {}
