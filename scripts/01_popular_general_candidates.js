@@ -24,7 +24,7 @@ import { isLocalAIPlayer } from "../src/ai_persona/lib/utils.js";
  */
 export const slqjAiScriptMeta = {
 	name: "热门武将候选影响",
-	version: "1.0.6",
+	version: "1.0.8",
 	description:
 		"影响开局 AI 选将候选列表：让热门/强势武将更容易进入候选并被选择（不会换入禁将/仅点将可用/点绛唇AI禁用武将）。",
 };
@@ -109,11 +109,13 @@ export default function setupPopularGeneralCandidates(ctx) {
 	logger.info("popular keys:", popular.size);
 
 	const env = { game, lib, get, _status, popular, logger, enableProbability, poolRatio };
+	wrapPlayerInitForChooseCharacterFallback(env);
 
 	let tries = 0;
 	(function retry() {
 		// 部分环境下 characterReplace 初始化可能略晚；在重试期间兜底一次
 		patchCharacterReplaceRandomGetExact(lib, _status, logger);
+		wrapPlayerInitForChooseCharacterFallback(env);
 		if (wrapCreateEvent(env)) return;
 		tries++;
 		if (tries > 50) {
@@ -237,6 +239,228 @@ function patchChooseCharacterEvent(ev, env) {
 		return originalAi.apply(this, arguments);
 	};
 	env.logger.debug("patched chooseCharacter event");
+}
+
+/**
+ * 兜底覆盖“非 event.ai 路径”的开局选将：
+ * - 典型场景：斗转星移的欢乐斗地主 `chooseCharacterHuanle`（`event.map[pid] + randomGet + player.init`）
+ * - 以及部分对决/自定义流程（`event.list.randomRemove() + player.init`）
+ *
+ * 设计目标：
+ * - 仅在 chooseCharacter 阶段触发
+ * - 仅影响本地 AI（且显式跳过 `game.me`），不改动玩家候选界面
+ * - 若可从 `event.map[pid]` 获取候选，则优先在候选内挑选热门/安全项；否则从 `event.list` 做安全交换
+ *
+ * @param {{game:any,lib:any,get:any,_status:any,popular:Set<string>,logger:any,enableProbability:number,poolRatio:number}} env
+ * @returns {boolean}
+ */
+function wrapPlayerInitForChooseCharacterFallback(env) {
+	const lib = env && env.lib;
+	const game = env && env.game;
+	if (!lib || !game) return false;
+	const proto = lib && lib.element && lib.element.Player && lib.element.Player.prototype;
+	if (!proto || typeof proto.init !== "function") return false;
+	if (proto.init.__slqjAiPopularGeneralCandidatesChooseCharFallbackWrapped) return true;
+
+	const originalInit = proto.init;
+	proto.init = function (character, character2, skill, update) {
+		try {
+			// 仅 chooseCharacter 阶段：
+			// - 若存在 event.ai（常规路径）：仅做“禁将兜底”（避免随机替换落到禁将）
+			// - 若不存在 event.ai（非标准路径）：按配置概率执行“热门偏置”，并同样确保不 init 禁将
+			const st = (env && env._status) || globalThis?._status;
+			const ev = st && st.event;
+			if (!ev || ev.name !== "chooseCharacter") return originalInit.apply(this, arguments);
+
+			// 明确跳过玩家本人（无论是否托管）：不影响玩家候选界面/体验
+			if (this === game.me) return originalInit.apply(this, arguments);
+
+			// 仅影响本地 AI（联机/观战不生效）
+			if (!isLocalAIPlayer(this, game, st)) return originalInit.apply(this, arguments);
+
+			const djcAiBanSet = getDianjiangchunAiBanSet(lib);
+			const originalKey = getCandidateCharacterKey(character, env && env.get);
+			if (!originalKey) return originalInit.apply(this, arguments);
+
+			const originalKey2 = getCandidateCharacterKey(character2, env && env.get);
+			const forbid1 = isForbiddenCandidate(originalKey, env, djcAiBanSet);
+			const forbid2 = !!originalKey2 && isForbiddenCandidate(originalKey2, env, djcAiBanSet);
+
+			const hasEventAi = typeof ev.ai === "function";
+			const decision = getPopularBiasDecision(this, env);
+			const applyPopular = !hasEventAi && decision.applyPopular;
+			if (!applyPopular && !forbid1 && !forbid2) return originalInit.apply(this, arguments);
+
+			let final1 = originalKey;
+			let final2 = originalKey2;
+			if (originalKey2) {
+				// 双将：分别替换（尽量避免与另一半重复）
+				if (applyPopular || forbid1) final1 = pickBiasedInitCharacter(originalKey, this, ev, env, djcAiBanSet, new Set([originalKey2]));
+				if (applyPopular || forbid2) final2 = pickBiasedInitCharacter(originalKey2, this, ev, env, djcAiBanSet, new Set([final1]));
+			} else {
+				// 单将
+				if (applyPopular || forbid1) final1 = pickBiasedInitCharacter(originalKey, this, ev, env, djcAiBanSet, null);
+			}
+
+			// 禁将兜底：若原本就是禁将但最终仍为禁将，说明候选池里没有安全项（best effort 不阻断流程）
+			if (forbid1 && isForbiddenCandidate(final1, env, djcAiBanSet)) final1 = originalKey;
+			if (forbid2 && isForbiddenCandidate(final2, env, djcAiBanSet)) final2 = originalKey2;
+
+			if (final1 === originalKey && final2 === originalKey2) return originalInit.apply(this, arguments);
+
+			env.logger &&
+				env.logger.debug &&
+				env.logger.debug(
+					"chooseCharacter init fallback:",
+					"from=",
+					originalKey,
+					originalKey2 ? "," : "",
+					originalKey2 || "",
+					"to=",
+					final1,
+					final2 ? "," : "",
+					final2 || "",
+					"player:",
+					safePlayerName(this)
+				);
+
+			const args = Array.from(arguments);
+			args[0] = final1;
+			if (originalKey2) args[1] = final2;
+			return originalInit.apply(this, args);
+		} catch (e) {
+			try {
+				console.error("[身临其境的AI][scripts] popular_general_candidates init fallback failed", e);
+			} catch (e2) { }
+			return originalInit.apply(this, arguments);
+		}
+	};
+	proto.init.__slqjAiPopularGeneralCandidatesChooseCharFallbackWrapped = true;
+	proto.init.__slqjAiPopularGeneralCandidatesChooseCharFallbackOriginal = originalInit;
+	env.logger && env.logger.info && env.logger.info("wrapped player.init (chooseCharacter fallback)");
+	return true;
+}
+
+/**
+ * 为非 `event.ai` 路径提供“最终 init 角色”兜底选择：
+ * - 优先从 `event.map[pid]` 的候选中挑选热门/安全项
+ * - 若无法获取候选，则尝试从 `event.list` 做“换入热门”的安全交换（保持池大小不变）
+ *
+ * @param {string} originalKey
+ * @param {*} player
+ * @param {*} ev
+ * @param {{game:any,lib:any,get:any,_status:any,popular:Set<string>,logger:any}} env
+ * @param {Set<string>} djcAiBanSet
+ * @param {Set<string>|null} excludeSet
+ * @returns {string}
+ */
+function pickBiasedInitCharacter(originalKey, player, ev, env, djcAiBanSet, excludeSet) {
+	// 1) event.map 路径：仅在候选中偏热门/保底安全，不触碰全局池子（避免影响玩家候选）
+	try {
+		const pid = player && player.playerid;
+		const map = ev && ev.map;
+		const list = pid && map && map[pid];
+		if (Array.isArray(list) && list.length) {
+			const picked = pickPreferredFromCandidates(originalKey, list, env, player, djcAiBanSet, excludeSet);
+			// 候选内能挑到安全项 → 直接返回；若候选全不安全则继续走 pool 兜底（best effort）
+			if (picked &&
+				!isForbiddenCandidate(picked, env, djcAiBanSet) &&
+				!(excludeSet && excludeSet.has(picked))) return picked;
+		}
+	} catch (e) { }
+
+	// 2) event.list 路径：通过交换把热门换入（保持池大小不变）
+	try {
+		const pool = ev && ev.list;
+		if (Array.isArray(pool) && pool.length) {
+			return swapInPreferredFromPool(originalKey, pool, env, player, djcAiBanSet, excludeSet);
+		}
+	} catch (e) { }
+
+	return originalKey;
+}
+
+/**
+ * 从候选列表中挑选“更优”的 init 角色：
+ * - 若原角色已是热门且安全 → 保持不变
+ * - 否则优先挑选热门且安全的候选；再不行则挑选任意安全候选
+ *
+ * @param {string} originalKey
+ * @param {string[]} candidates
+ * @param {{lib:any,get:any,popular:Set<string>,logger:any}} env
+ * @param {*} player
+ * @param {Set<string>} djcAiBanSet
+ * @param {Set<string>|null} excludeSet
+ * @returns {string}
+ */
+function pickPreferredFromCandidates(originalKey, candidates, env, player, djcAiBanSet, excludeSet) {
+	if (!Array.isArray(candidates) || !candidates.length) return originalKey;
+	const excludedOriginal = !!(excludeSet && excludeSet.has(originalKey));
+	if (!excludedOriginal && isPopular(originalKey, env) && !isForbiddenCandidate(originalKey, env, djcAiBanSet)) return originalKey;
+
+	const hotSafe = [];
+	const safe = [];
+	for (const c of candidates) {
+		if (!c) continue;
+		if (excludeSet && excludeSet.has(c)) continue;
+		if (isForbiddenCandidate(c, env, djcAiBanSet)) continue;
+		if (isPopular(c, env)) hotSafe.push(c);
+		else safe.push(c);
+	}
+	if (hotSafe.length) return hotSafe[Math.floor(Math.random() * hotSafe.length)];
+	if (!excludedOriginal && !isForbiddenCandidate(originalKey, env, djcAiBanSet)) return originalKey;
+	if (safe.length) return safe[Math.floor(Math.random() * safe.length)];
+	return originalKey;
+}
+
+/**
+ * 从池子中“换入”一个更优候选：优先热门且安全，保持池大小不变。
+ *
+ * 注意：该池子通常是 chooseCharacter 阶段用于后续分配的剩余候选；
+ * 仅对非 `game.me` 的 AI init 触发（外层已强约束），避免影响玩家候选界面。
+ *
+ * @param {string} originalKey
+ * @param {any[]} pool
+ * @param {{lib:any,get:any,popular:Set<string>,logger:any}} env
+ * @param {*} player
+ * @param {Set<string>} djcAiBanSet
+ * @param {Set<string>|null} excludeSet
+ * @returns {string}
+ */
+function swapInPreferredFromPool(originalKey, pool, env, player, djcAiBanSet, excludeSet) {
+	if (!Array.isArray(pool) || !pool.length) return originalKey;
+	if (!(excludeSet && excludeSet.has(originalKey)) &&
+		isPopular(originalKey, env) &&
+		!isForbiddenCandidate(originalKey, env, djcAiBanSet)) return originalKey;
+
+	let idx = pool.findIndex((c) => {
+		const key = getCandidateCharacterKey(c, env && env.get);
+		if (!key) return false;
+		if (excludeSet && excludeSet.has(key)) return false;
+		return isPopular(key, env) && !isForbiddenCandidate(key, env, djcAiBanSet);
+	});
+	if (idx < 0 && isForbiddenCandidate(originalKey, env, djcAiBanSet)) {
+		// 保底：原角色不安全时，尝试换入任意安全项
+		idx = pool.findIndex((c) => {
+			const key = getCandidateCharacterKey(c, env && env.get);
+			if (!key) return false;
+			if (excludeSet && excludeSet.has(key)) return false;
+			return !isForbiddenCandidate(key, env, djcAiBanSet);
+		});
+	}
+	if (idx < 0) return originalKey;
+
+	const chosen = pool[idx];
+	pool.splice(idx, 1);
+	// 保持池大小不变：把原 key 放回池子（若池子里已存在则不重复添加）
+	try {
+		if (originalKey && !pool.includes(originalKey)) pool.push(originalKey);
+	} catch (e) { }
+
+	env.logger &&
+		env.logger.debug &&
+		env.logger.debug("swap in preferred from pool:", chosen, "swap out:", originalKey, "player:", safePlayerName(player));
+	return getCandidateCharacterKey(chosen, env && env.get) || originalKey;
 }
 
 /**
