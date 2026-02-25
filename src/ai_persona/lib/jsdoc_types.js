@@ -138,6 +138,7 @@ export {};
  *  slqj_ai_scripts_enable?: boolean,
  *  slqj_ai_scripts_registry?: (string|object),
  *  slqj_ai_scripts_config?: (string|object),
- *  slqj_ai_scripts_debug?: boolean
+ *  slqj_ai_scripts_debug?: boolean,
+ *  slqj_ai_visual_debug_enable?: boolean
  * }} SlqjAiExtensionConfig
  */ 
