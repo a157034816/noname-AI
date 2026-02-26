@@ -6,6 +6,7 @@ import {
   resolveScriptConfigValues,
   computeScriptConfigOverrides,
 } from "./scripts_config.js";
+import { get as getLogger } from "./logger/manager.js";
 
 const ROOT_ID = "slqj-ai-scripts-manager-root";
 
@@ -908,7 +909,7 @@ export function createModalShell(opts) {
   }
   if (isModalLayoutDebugEnabled()) {
     try {
-      console.debug("[slqj-ai][modal] mounted", { parent: backdrop && backdrop.parentNode ? backdrop.parentNode.nodeName : null });
+      getLogger("console").debug("modal", "mounted", { parent: backdrop && backdrop.parentNode ? backdrop.parentNode.nodeName : null });
     } catch (e) {}
   }
 
@@ -944,7 +945,7 @@ export function createModalShell(opts) {
       applyModalSize(modal, state);
       if (isModalLayoutDebugEnabled()) {
         try {
-          console.debug("[slqj-ai][modal] recomputeLayout", {
+          getLogger("console").debug("modal", "recomputeLayout", {
             coarse: isCoarsePointer(),
             sx: state.sx,
             sy: state.sy,
@@ -1722,7 +1723,7 @@ function compensateOverlayTransform(overlay) {
     } catch (e) {}
     if (isModalLayoutDebugEnabled()) {
       try {
-        console.debug("[slqj-ai][modal] overlay: skip shrink compensation", { sx0, sy0, rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height }, vw, vh, lw, lh });
+        getLogger("console").debug("modal", "overlay: skip shrink compensation", { sx0, sy0, rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height }, vw, vh, lw, lh });
       } catch (e) {}
     }
     return { sx: 1, sy: 1 };
@@ -1782,7 +1783,7 @@ function applyCenterOffset(offsetWrap, state, ui) {
     } catch (e) {}
     if (debug) {
       try {
-        console.debug("[slqj-ai][modal] center: viewport (coarse)");
+        getLogger("console").debug("modal", "center: viewport (coarse)");
       } catch (e) {}
     }
     return;
@@ -1794,7 +1795,7 @@ function applyCenterOffset(offsetWrap, state, ui) {
     } catch (e) {}
     if (debug) {
       try {
-        console.debug("[slqj-ai][modal] center: viewport (no target)");
+        getLogger("console").debug("modal", "center: viewport (no target)");
       } catch (e) {}
     }
     return;
@@ -1807,7 +1808,7 @@ function applyCenterOffset(offsetWrap, state, ui) {
     } catch (e) {}
     if (debug) {
       try {
-        console.debug("[slqj-ai][modal] center: viewport (target not ready)", {
+        getLogger("console").debug("modal", "center: viewport (target not ready)", {
           rect: rect ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height } : null,
         });
       } catch (e) {}
@@ -1822,7 +1823,7 @@ function applyCenterOffset(offsetWrap, state, ui) {
     } catch (e) {}
     if (debug) {
       try {
-        console.debug("[slqj-ai][modal] center: viewport (invalid viewport)", { vw, vh });
+        getLogger("console").debug("modal", "center: viewport (invalid viewport)", { vw, vh });
       } catch (e) {}
     }
     return;
@@ -1843,7 +1844,7 @@ function applyCenterOffset(offsetWrap, state, ui) {
     } catch (e) {}
     if (debug) {
       try {
-        console.debug("[slqj-ai][modal] center: clamped to viewport", {
+        getLogger("console").debug("modal", "center: clamped to viewport", {
           vw,
           vh,
           dx,
@@ -1867,7 +1868,7 @@ function applyCenterOffset(offsetWrap, state, ui) {
 
   if (debug) {
     try {
-      console.debug("[slqj-ai][modal] center: ui target", {
+      getLogger("console").debug("modal", "center: ui target", {
         vw,
         vh,
         dx,

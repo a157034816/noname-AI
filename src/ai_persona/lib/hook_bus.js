@@ -2,6 +2,8 @@
  * @typedef {{priority?:number, once?:boolean}} HookOptions
  */
 
+import { get as getLogger } from "../../logger/manager.js";
+
 /**
  * @typedef {{on:Function, off:Function, emit:Function, has:Function, clear:Function, list:Function}} HookBus
  */
@@ -18,6 +20,7 @@
  * @returns {HookBus}
  */
 export function createHookBus() {
+  const logger = getLogger("console");
   const map = new Map();
 
   /**
@@ -116,7 +119,7 @@ export function createHookBus() {
         if (res !== undefined) ctx = res;
       } catch (e) {
         try {
-          console.error("[身临其境的AI][hook]", name, e);
+          logger.error("hook", name, e);
         } catch (e2) {}
       }
 
