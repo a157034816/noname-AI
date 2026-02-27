@@ -2,7 +2,7 @@
  * @typedef {{priority?:number, once?:boolean}} HookOptions
  */
 
-import { get as getLogger } from "../../logger/manager.js";
+import logManager from "../../logger/manager.js";
 
 /**
  * @typedef {{on:Function, off:Function, emit:Function, has:Function, clear:Function, list:Function}} HookBus
@@ -20,7 +20,7 @@ import { get as getLogger } from "../../logger/manager.js";
  * @returns {HookBus}
  */
 export function createHookBus() {
-  const logger = getLogger("console");
+  const logger = logManager;
   const map = new Map();
 
   /**

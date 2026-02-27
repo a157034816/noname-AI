@@ -7,7 +7,7 @@ import { loadExtensionScripts } from "./src/scripts_loader.js";
 import { openScriptsPluginManagerModal } from "./src/scripts_manager_modal.js";
 import { maybeAutoCheckForUpdates } from "./src/update/auto_check.js";
 import { openUpdateModal } from "./src/update/update_modal.js";
-import { register, get as getLogger } from "./src/logger/manager.js";
+import logManager from "./src/logger/manager.js";
 import { ConsoleLogger } from "./src/logger/console.js";
 import { SLQJ_AI_EXTENSION_VERSION, SLQJ_AI_EXTENSION_NAME } from "./src/version.js";
 export const type = "extension";
@@ -70,35 +70,35 @@ export default function(){
 			};
 
 			const basePrefix = `[${SLQJ_AI_EXTENSION_NAME}]`;
-			const logger = register("console", ConsoleLogger, { prefix: basePrefix, debug: isDebug });
+			logManager.register("console", ConsoleLogger, { prefix: basePrefix, debug: isDebug });
 
 			try{
 				installPersonaSystem({ lib, game, get, ai, _status, config });
 			}catch(e){
-				logger.error("persona", "installPersonaSystem failed", e);
+				logManager.error("persona", "installPersonaSystem failed", e);
 			}
 
 			/** 核心：技能自定义 tag 补全（基于技能说明正则匹配推导并写入 skill.ai）。 */
 			try{
 				installSkillCustomTags({ lib, game, ui, get, ai, _status, config });
 			}catch(e){
-				logger.error("skill_custom_tags", "installSkillCustomTags failed", e);
+				logManager.error("skill_custom_tags", "installSkillCustomTags failed", e);
 			}
 
 		/** 互动事件：监听 `player.throwEmotion(...)` 并通过 game.slqjAiHooks 分发。 */
 		try{
 			installEmotionThrowEvent({ lib, game, _status });
 		}catch(e){
-			logger.error("emotion_throw", "installEmotionThrowEvent failed", e);
+			logManager.error("emotion_throw", "installEmotionThrowEvent failed", e);
 		}
 
 		/** 扩展脚本插件：加载 `scripts/` 下的一层脚本文件（可通过 game.slqjAiHooks 注册 hook）。 */
 		try{
 			loadExtensionScripts({ baseUrl: import.meta.url, lib, game, ui, get, ai, _status, config }).catch(function(e){
-				logger.error("scripts", "loadExtensionScripts failed", e);
+				logManager.error("scripts", "loadExtensionScripts failed", e);
 			});
 	}catch(e){
-		logger.error("scripts", "loadExtensionScripts failed", e);
+		logManager.error("scripts", "loadExtensionScripts failed", e);
 	}
 
 		/** 视觉调试：根据 AI 打分在 UI 中高亮“最可能的选择”（默认关闭，可热切换）。 */
@@ -107,7 +107,7 @@ export default function(){
 				installVisualDebug({ lib, game, ui, get, ai, _status, config });
 			}
 		}catch(e){
-			console.error("[身临其境的AI] installVisualDebug failed", e);
+			logManager.error("visual_debug", "installVisualDebug failed", e);
 		}
 
 		/** 启动时自动检查更新（每次启动最多一次）；发现新版本自动弹窗提示，不强制更新。 */
@@ -118,16 +118,16 @@ export default function(){
 					if(game&&game.__slqjAiUpdateModalOpened) return;
 					if(game) game.__slqjAiUpdateModalOpened=true;
 					openUpdateModal({ baseUrl: import.meta.url, lib, game, ui, config: lib.config, currentVersion: SLQJ_AI_EXTENSION_VERSION, initialCheck: result }).catch(function(e){
-						logger.error("update", "openUpdateModal failed", e);
+						logManager.error("update", "openUpdateModal failed", e);
 					});
 				}catch(e){
-					logger.error("update", "maybeAutoCheckForUpdates handler failed", e);
+					logManager.error("update", "maybeAutoCheckForUpdates handler failed", e);
 				}
 			}).catch(function(e){
-				logger.error("update", "maybeAutoCheckForUpdates failed", e);
+				logManager.error("update", "maybeAutoCheckForUpdates failed", e);
 			});
 		}catch(e){
-			logger.error("update", "maybeAutoCheckForUpdates failed", e);
+			logManager.error("update", "maybeAutoCheckForUpdates failed", e);
 		}
 },config:{
 	slqj_ai_inspect_lang:{
@@ -320,7 +320,7 @@ export default function(){
 			try{
 				openScriptsPluginManagerModal({ baseUrl: import.meta.url, lib, game, ui, config: lib.config });
 			}catch(e){
-				getLogger("console").error("modal", "openScriptsPluginManagerModal failed", e);
+				logManager.error("modal", "openScriptsPluginManagerModal failed", e);
 			}
 		},
 	},
@@ -347,10 +347,10 @@ export default function(){
 		onclick:function(){
 			try{
 				openUpdateModal({ baseUrl: import.meta.url, lib, game, ui, config: lib.config, currentVersion: SLQJ_AI_EXTENSION_VERSION }).catch(function(e){
-					getLogger("console").error("update", "openUpdateModal failed", e);
+					logManager.error("update", "openUpdateModal failed", e);
 				});
 			}catch(e){
-				getLogger("console").error("update", "openUpdateModal failed", e);
+				logManager.error("update", "openUpdateModal failed", e);
 			}
 		},
 	},
@@ -385,7 +385,7 @@ export default function(){
 			try{
 				window.open(url);
 			}catch(e){
-				getLogger("console").error("ui", "openJoinGroupUrl failed", e);
+				logManager.error("ui", "openJoinGroupUrl failed", e);
 			}
 		},
 	},
