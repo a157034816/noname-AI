@@ -9,6 +9,12 @@ const EXTENSION_NAME = "身临其境的AI";
 const CONFIG_KEY = "slqj_ai_scripts_registry";
 const DEFAULT_SCRIPTS_DIR = `extension/${EXTENSION_NAME}/scripts`;
 
+/** @type {Record<string, boolean>} */
+const DEFAULT_DISABLED = {
+  // 该脚本会在屏幕叠加弹幕层（偏“刷屏/表现层”）；默认禁用，避免影响未配置用户的体验。
+  "00_logger_danmaku_overlay.js": true,
+};
+
 /**
  * 读取并解析脚本插件注册表配置。
  *
@@ -22,7 +28,11 @@ const DEFAULT_SCRIPTS_DIR = `extension/${EXTENSION_NAME}/scripts`;
  */
 export function readScriptsRegistry(config, lib) {
   const raw = config?.[CONFIG_KEY] ?? lib?.config?.[CONFIG_KEY];
-  const fallback = /** @type {SlqjAiScriptsRegistryV1} */ ({ version: 1, order: [], disabled: {} });
+  const fallback = /** @type {SlqjAiScriptsRegistryV1} */ ({
+    version: 1,
+    order: [],
+    disabled: { ...DEFAULT_DISABLED },
+  });
 
   if (!raw) return fallback;
   if (typeof raw === "string") {

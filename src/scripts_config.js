@@ -8,7 +8,7 @@
  */
 
 /**
- * @typedef {"boolean"|"number"|"string"|"select"} SlqjAiScriptConfigItemType
+ * @typedef {"boolean"|"number"|"string"|"textarea"|"select"} SlqjAiScriptConfigItemType
  */
 
 /**
@@ -198,12 +198,13 @@ function normalizeItem(input) {
   const name = String(input.name || "").trim();
   const type = String(input.type || "").trim();
   if (!key || !name) return null;
-  if (type !== "boolean" && type !== "number" && type !== "string" && type !== "select") return null;
+  if (type !== "boolean" && type !== "number" && type !== "string" && type !== "textarea" && type !== "select") return null;
 
   const d = input.default;
   if (type === "boolean" && typeof d !== "boolean") return null;
   if (type === "number" && typeof d !== "number") return null;
   if (type === "string" && typeof d !== "string") return null;
+  if (type === "textarea" && typeof d !== "string") return null;
   if (type === "select" && typeof d !== "string") return null;
   let defaultValue = d;
 
@@ -257,7 +258,7 @@ function coerceItemValue(item, raw) {
   const t = item.type;
   const def = item.default;
   if (t === "boolean") return coerceBoolean(raw, /** @type {boolean} */ (def));
-  if (t === "string") return coerceString(raw, /** @type {string} */ (def));
+  if (t === "string" || t === "textarea") return coerceString(raw, /** @type {string} */ (def));
   if (t === "number") {
     const base = coerceNumber(raw, /** @type {number} */ (def));
     return clampNumber(base, item.min, item.max);

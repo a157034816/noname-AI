@@ -6,7 +6,7 @@ import {
   resolveScriptConfigValues,
   computeScriptConfigOverrides,
 } from "./scripts_config.js";
-import { get as getLogger } from "./logger/manager.js";
+import logManager from "./logger/manager.js";
 
 const ROOT_ID = "slqj-ai-scripts-manager-root";
 
@@ -473,6 +473,19 @@ export async function openScriptsPluginManagerModal(opts) {
           input.addEventListener("blur", syncNumberDraftSafeCommit);
           syncDraftFns.push(syncNumberDraftSafeCommit);
           right.appendChild(input);
+        } else if (item.type === "textarea") {
+          const textarea = document.createElement("textarea");
+          textarea.className = "slqj-ai-textarea";
+          try {
+            textarea.autocomplete = "off";
+            textarea.spellcheck = false;
+          } catch (e) {}
+          textarea.value = draft[key] == null ? "" : String(draft[key]);
+          textarea.addEventListener("input", () => {
+            adjustedConfirmArmed = false;
+            draft = { ...draft, [key]: textarea.value };
+          });
+          right.appendChild(textarea);
         } else if (item.type === "select") {
           const select = document.createElement("select");
           select.className = "slqj-ai-select";
@@ -909,7 +922,7 @@ export function createModalShell(opts) {
   }
   if (isModalLayoutDebugEnabled()) {
     try {
-      getLogger("console").debug("modal", "mounted", { parent: backdrop && backdrop.parentNode ? backdrop.parentNode.nodeName : null });
+      logManager.debug("modal", "mounted", { parent: backdrop && backdrop.parentNode ? backdrop.parentNode.nodeName : null });
     } catch (e) {}
   }
 
@@ -945,7 +958,7 @@ export function createModalShell(opts) {
       applyModalSize(modal, state);
       if (isModalLayoutDebugEnabled()) {
         try {
-          getLogger("console").debug("modal", "recomputeLayout", {
+          logManager.debug("modal", "recomputeLayout", {
             coarse: isCoarsePointer(),
             sx: state.sx,
             sy: state.sy,
@@ -1423,7 +1436,7 @@ function getCssText() {
   justify-content:flex-end;
   gap:8px;
 }
-.slqj-ai-input,.slqj-ai-select{
+.slqj-ai-input,.slqj-ai-select,.slqj-ai-textarea{
   width:220px;
   max-width:40vw;
   border-radius:10px;
@@ -1433,7 +1446,13 @@ function getCssText() {
   padding:8px 10px;
   font-size:13px;
 }
-.slqj-ai-input:focus,.slqj-ai-select:focus{
+.slqj-ai-textarea{
+  min-height:96px;
+  resize:vertical;
+  line-height:1.4;
+  white-space:pre-wrap;
+}
+.slqj-ai-input:focus,.slqj-ai-select:focus,.slqj-ai-textarea:focus{
   outline:none;
   border-color:rgba(100,170,255,.55);
   box-shadow:0 0 0 2px rgba(100,170,255,.20);
@@ -1723,7 +1742,7 @@ function compensateOverlayTransform(overlay) {
     } catch (e) {}
     if (isModalLayoutDebugEnabled()) {
       try {
-        getLogger("console").debug("modal", "overlay: skip shrink compensation", { sx0, sy0, rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height }, vw, vh, lw, lh });
+        logManager.debug("modal", "overlay: skip shrink compensation", { sx0, sy0, rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height }, vw, vh, lw, lh });
       } catch (e) {}
     }
     return { sx: 1, sy: 1 };
@@ -1783,7 +1802,7 @@ function applyCenterOffset(offsetWrap, state, ui) {
     } catch (e) {}
     if (debug) {
       try {
-        getLogger("console").debug("modal", "center: viewport (coarse)");
+        logManager.debug("modal", "center: viewport (coarse)");
       } catch (e) {}
     }
     return;
@@ -1795,7 +1814,7 @@ function applyCenterOffset(offsetWrap, state, ui) {
     } catch (e) {}
     if (debug) {
       try {
-        getLogger("console").debug("modal", "center: viewport (no target)");
+        logManager.debug("modal", "center: viewport (no target)");
       } catch (e) {}
     }
     return;
@@ -1808,7 +1827,7 @@ function applyCenterOffset(offsetWrap, state, ui) {
     } catch (e) {}
     if (debug) {
       try {
-        getLogger("console").debug("modal", "center: viewport (target not ready)", {
+        logManager.debug("modal", "center: viewport (target not ready)", {
           rect: rect ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height } : null,
         });
       } catch (e) {}
@@ -1823,7 +1842,7 @@ function applyCenterOffset(offsetWrap, state, ui) {
     } catch (e) {}
     if (debug) {
       try {
-        getLogger("console").debug("modal", "center: viewport (invalid viewport)", { vw, vh });
+        logManager.debug("modal", "center: viewport (invalid viewport)", { vw, vh });
       } catch (e) {}
     }
     return;
@@ -1844,7 +1863,7 @@ function applyCenterOffset(offsetWrap, state, ui) {
     } catch (e) {}
     if (debug) {
       try {
-        getLogger("console").debug("modal", "center: clamped to viewport", {
+        logManager.debug("modal", "center: clamped to viewport", {
           vw,
           vh,
           dx,
@@ -1868,7 +1887,7 @@ function applyCenterOffset(offsetWrap, state, ui) {
 
   if (debug) {
     try {
-      getLogger("console").debug("modal", "center: ui target", {
+      logManager.debug("modal", "center: ui target", {
         vw,
         vh,
         dx,

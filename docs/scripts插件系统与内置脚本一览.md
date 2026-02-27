@@ -142,9 +142,12 @@ export const slqjAiScriptConfig = {
     { key: "enabled", name: "启用", type: "boolean", default: false },
     { key: "chance", name: "概率", type: "number", default: 0.5, min: 0, max: 1, step: 0.05 },
     { key: "mode", name: "模式", type: "select", default: "A", options: [{ value: "A", label: "A" }, { value: "B", label: "B" }] },
+    { key: "keywords", name: "关键字", type: "textarea", default: "", description: "每行一个关键字" },
   ],
 };
 ```
+
+其中 `type` 支持：`boolean` / `number` / `string` / `textarea` / `select`。
 
 保存键（JSON 字符串）：
 
@@ -162,7 +165,7 @@ export const slqjAiScriptConfig = {
 }
 ```
 
-补充：在“脚本插件管理 -> 配置(⚙)”里，数字项会按 `number` 类型保存；清空数字输入框表示恢复默认值（不会写入 `overrides`）。
+补充：在“脚本插件管理 -> 配置(⚙)”里，数字项会按 `number` 类型保存；清空数字输入框表示恢复默认值（不会写入 `overrides`）。`textarea` 类型为多行文本输入。
 
 加载器会把“生效配置值”（默认值 + 覆盖值 + 类型/范围兜底）注入到 `ctx.scriptConfig`。
 
@@ -241,6 +244,8 @@ HookBus 支持 `priority`（越大越先执行）：
 
 说明：默认值来自各脚本导出的 `slqjAiScriptConfig`；配置保存到 `slqj_ai_scripts_config`（仅保存覆盖值）。
 
+- `00_logger_danmaku_overlay.js`
+  - `rows`: `6`
 - `01_popular_general_candidates.js`
   - `enableProbability`: `1`
   - `poolRatio`: `0.5`
@@ -581,7 +586,30 @@ HookBus 支持 `priority`（越大越先执行）：
 
 ---
 
-### 6.9 技能自定义tag补全（框架）【已迁移至扩展核心】
+### 6.9 `00_logger_danmaku_overlay.js`：Logger 弹幕层（AI 日志飘屏）
+
+元信息：
+
+- name：Logger 弹幕层（AI 日志飘屏）
+- version：1.0.2
+- 作用：启用后在屏幕叠加弹幕层；当“身临其境的AI”的 logger 输出日志时，将其以弹幕形式从右向左飘过
+
+接入点：
+
+- 通过 `logManager.register(...)` 注册为独立 logger（由 logManager 广播驱动），无需 patch console logger
+- 当 body 就绪后创建弹幕 overlay（`position: fixed` + `pointer-events: none`），每条弹幕动画结束自动移除
+- 支持 `%s/%d/%i/%f/%o/%O/%%` 格式化（弹幕忽略 `%c` 样式参数）
+- 输出前支持关键字过滤：命中黑名单跳过；未命中黑名单则仅白名单命中才输出
+
+可调参数（⚙）：
+
+- `rows`：弹幕行数（`1~10`，默认 `6`）
+- `whitelist`：白名单关键字（多行，每行一个；默认空；空=不输出任何弹幕）
+- `blacklist`：黑名单关键字（多行，每行一个；默认空；命中则不输出，且优先于白名单）
+
+---
+
+### 6.10 技能自定义tag补全（框架）【已迁移至扩展核心】
 
 说明：
 

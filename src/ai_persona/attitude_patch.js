@@ -1,8 +1,155 @@
 import { STORAGE_KEY } from "./lib/constants.js";
 import { clamp, lerp, getPid } from "./lib/utils.js";
 import { explainGuessIdentityFor } from "./guess_identity.js";
+import logManager from "../logger/manager.js";
 
 let originalGetAttitude = null;
+
+/**
+ * 取得态度变化日志缓存（存于 `game.__slqjAiPersona` 上）。
+ *
+ * 说明：
+ * - 新开一局时 `game.roundNumber` 通常会重置；此时会清空缓存，避免跨局误判为“变化”导致开局刷屏。
+ *
+ * @param {*} game
+ * @returns {Map<string, number>|null}
+ */
+function getAttitudeLogCache(game) {
+	const root = game?.__slqjAiPersona;
+	if (!root || typeof root !== "object") return null;
+	const round =
+		typeof game?.roundNumber === "number" && Number.isFinite(game.roundNumber)
+			? game.roundNumber
+			: null;
+	if (typeof round === "number") {
+		const lastRound =
+			typeof root._attitudeLogCacheRound === "number" && Number.isFinite(root._attitudeLogCacheRound)
+				? root._attitudeLogCacheRound
+				: null;
+		if (typeof lastRound === "number" && round < lastRound) {
+			root._attitudeLogCache = new Map();
+		}
+		root._attitudeLogCacheRound = round;
+	}
+
+	root._attitudeLogCache ??= new Map();
+	return root._attitudeLogCache;
+}
+
+/**
+ * 将态度值归一化为可稳定比较的数值（保留 2 位小数）。
+ *
+ * @param {any} n
+ * @returns {number|null}
+ */
+function normalizeAttitudeNumber(n) {
+	if (typeof n !== "number" || Number.isNaN(n) || !Number.isFinite(n)) return null;
+	return Math.round(n * 100) / 100;
+}
+
+/**
+ * 构建“from→to@mode”的稳定 key。
+ *
+ * @param {*} from
+ * @param {*} to
+ * @param {string} mode
+ * @returns {string}
+ */
+function buildAttitudeLogKey(from, to, mode) {
+	const fp = getPid(from);
+	const tp = getPid(to);
+	return `${fp}→${tp}@${String(mode || "")}`;
+}
+
+/**
+ * 当态度数值发生变化时输出日志（通过 `logManager` 广播）。
+ *
+ * 输出内容：
+ * - 中文白话：`{谁}对{谁}的态度增加/减少{x}`
+ * - 结构化对象：便于弹幕层/面板等二次消费
+ *
+ * @param {{
+ *  from:any,
+ *  to:any,
+ *  mode:string,
+ *  base:number,
+ *  perceived:(number|null),
+ *  reason:string,
+ *  result:number,
+ *  game:any,
+ *  get:any,
+ * }} args
+ * @returns {void}
+ */
+function maybeLogAttitudeChange(args) {
+	try {
+		const from = args?.from;
+		const to = args?.to;
+		if (!from || !to || from === to) return;
+
+		const game = args?.game;
+		const cache = getAttitudeLogCache(game);
+		if (!cache) return;
+
+		const mode = String(args?.mode || "");
+		const key = buildAttitudeLogKey(from, to, mode);
+
+		const now = normalizeAttitudeNumber(args?.result);
+		if (now == null) return;
+
+		const last = cache.get(key);
+		// 首次出现仅记录，不视为“变化”（避免开局刷屏）。
+		if (typeof last !== "number") {
+			cache.set(key, now);
+			return;
+		}
+		if (last === now) return;
+		cache.set(key, now);
+
+		/** @type {(p:any)=>string} */
+		const tr = (p) => {
+			try {
+				const g = args?.get;
+				if (typeof g?.translation === "function") {
+					const s = String(g.translation(p) || "").trim();
+					if (s) return s;
+				}
+			} catch (e) {}
+			try {
+				const s = String(p?.name || p?.playerid || p?.dataset?.position || "").trim();
+				if (s) return s;
+			} catch (e) {}
+			try {
+				const s = String(getPid(p) || "").trim();
+				if (s) return s;
+			} catch (e) {}
+			return "未知角色";
+		};
+
+		const deltaRaw = normalizeAttitudeNumber(now - last);
+		if (deltaRaw == null) return;
+		const deltaAbs = normalizeAttitudeNumber(Math.abs(deltaRaw));
+		if (deltaAbs == null || deltaAbs <= 0) return;
+
+		const payload = {
+			from: tr(from),
+			to: tr(to),
+			mode,
+			prev: last,
+			next: now,
+			delta: deltaRaw,
+			base: normalizeAttitudeNumber(args?.base),
+			perceived: normalizeAttitudeNumber(args?.perceived),
+			reason: String(args?.reason || ""),
+		};
+
+		const plainZh = `${payload.from}对${payload.to}的态度${deltaRaw > 0 ? "增加" : "减少"}${deltaAbs}`;
+		// 保留原先结构化输出，便于脚本/面板二次消费。
+		logManager.log("attitude", payload);
+		// 追加中文白话输出，便于直接读日志/弹幕层展示。
+		logManager.log("态度变更", plainZh);
+	} catch (e) {}
+}
 
 /**
  * 从 game 上取得 Hook Bus（若未启用对应事件则返回 null）。
@@ -167,6 +314,10 @@ export function installAttitudePatch({ get, game, _status }) {
 			}
 		}
 
+		let finalReason = reason;
+		let finalPerceived = perceived;
+		let final = result;
+
 		if (hooks) {
 			const ctx = {
 				from,
@@ -182,11 +333,28 @@ export function installAttitudePatch({ get, game, _status }) {
 				get,
 			};
 			hooks.emit("slqj_ai_attitude", ctx);
-			if (ctx.forceOriginal) return base;
-			if (typeof ctx.result === "number" && !Number.isNaN(ctx.result)) return ctx.result;
+			finalReason = ctx && typeof ctx.reason !== "undefined" ? String(ctx.reason || "") : finalReason;
+			finalPerceived =
+				ctx && typeof ctx.perceived === "number" && !Number.isNaN(ctx.perceived)
+					? ctx.perceived
+					: finalPerceived;
+			if (ctx.forceOriginal) final = base;
+			else if (typeof ctx.result === "number" && !Number.isNaN(ctx.result)) final = ctx.result;
 		}
 
-		return result;
+		maybeLogAttitudeChange({
+			from,
+			to,
+			mode: get.mode(),
+			base,
+			perceived: finalPerceived,
+			reason: finalReason,
+			result: final,
+			game,
+			get,
+		});
+
+		return final;
 	};
 }
 

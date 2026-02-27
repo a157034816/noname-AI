@@ -60,6 +60,121 @@ export function get(name) {
 }
 
 /**
+ * 广播：将日志输出到所有已注册的 logger。
+ *
+ * @param {"log"|"warn"|"error"|"debug"} level
+ * @param {any} feature
+ * @param {any[]} args
+ * @returns {void}
+ */
+function broadcast(level, feature, args) {
+  const entries = Array.from(registry.values());
+  for (const entry of entries) {
+    const logger = entry && entry.logger;
+    if (!logger) continue;
+    try {
+      /** @type {any} */
+      const anyLogger = logger;
+      const fn = anyLogger && anyLogger[level];
+      if (typeof fn !== "function") continue;
+      fn.call(logger, feature, ...(Array.isArray(args) ? args : []));
+    } catch (e) {}
+  }
+}
+
+/**
+ * 统一处理参数：支持 `log(feature, ...args)` 与 `log(message)` 两种调用方式。
+ *
+ * @param {any} featureOrMsg
+ * @param {any[]} args
+ * @returns {{feature:any, args:any[]}}
+ */
+function normalizeFeatureAndArgs(featureOrMsg, args) {
+  const rest = Array.isArray(args) ? args : [];
+  if (!rest.length) {
+    if (typeof featureOrMsg === "undefined") return { feature: "", args: [] };
+    return { feature: "", args: [featureOrMsg] };
+  }
+  return { feature: featureOrMsg == null ? "" : featureOrMsg, args: rest };
+}
+
+/**
+ * 输出普通日志：触发所有已注册 logger。
+ *
+ * @param {any} featureOrMsg
+ * @param {...any} args
+ * @returns {void}
+ */
+export function log(featureOrMsg, ...args) {
+  const n = normalizeFeatureAndArgs(featureOrMsg, args);
+  broadcast("log", n.feature, n.args);
+}
+
+/**
+ * 输出 info 日志（别名）：等价于 `log(...)`。
+ *
+ * @param {any} featureOrMsg
+ * @param {...any} args
+ * @returns {void}
+ */
+export function info(featureOrMsg, ...args) {
+  log(featureOrMsg, ...args);
+}
+
+/**
+ * 输出 warning 日志：触发所有已注册 logger。
+ *
+ * @param {any} featureOrMsg
+ * @param {...any} args
+ * @returns {void}
+ */
+export function warn(featureOrMsg, ...args) {
+  const n = normalizeFeatureAndArgs(featureOrMsg, args);
+  broadcast("warn", n.feature, n.args);
+}
+
+/**
+ * 输出 error 日志：触发所有已注册 logger。
+ *
+ * @param {any} featureOrMsg
+ * @param {...any} args
+ * @returns {void}
+ */
+export function error(featureOrMsg, ...args) {
+  const n = normalizeFeatureAndArgs(featureOrMsg, args);
+  broadcast("error", n.feature, n.args);
+}
+
+/**
+ * 输出 debug 日志：触发所有已注册 logger。
+ *
+ * @param {any} featureOrMsg
+ * @param {...any} args
+ * @returns {void}
+ */
+export function debug(featureOrMsg, ...args) {
+  const n = normalizeFeatureAndArgs(featureOrMsg, args);
+  broadcast("debug", n.feature, n.args);
+}
+
+/**
+ * 是否有任一已注册 logger 处于 debug 开启状态。
+ *
+ * @returns {boolean}
+ */
+export function isDebug() {
+  const entries = Array.from(registry.values());
+  for (const entry of entries) {
+    const logger = entry && entry.logger;
+    if (!logger) continue;
+    try {
+      if (typeof logger.isDebug === "function" && logger.isDebug()) return true;
+    } catch (e) {}
+  }
+  return false;
+}
+
+/**
  * @param {string} name
  * @param {new (opts:any)=>SlqjLogger} LoggerClass
  * @param {SlqjLoggerRegisterOptions|undefined} opts
@@ -100,3 +215,29 @@ function buildDefaultPrefix(name) {
   if (!base) return `[${name}]`;
   return `${base}[${name}]`;
 }
+
+/**
+ * @typedef {{
+ *  register: typeof register,
+ *  get: typeof get,
+ *  log: typeof log,
+ *  info: typeof info,
+ *  warn: typeof warn,
+ *  error: typeof error,
+ *  debug: typeof debug,
+ *  isDebug: typeof isDebug,
+ * }} SlqjLogManager
+ */
+
+/**
+ * 日志管理器：暴露与 logger 类似的调用方式，并将输出广播到所有已注册 logger。
+ *
+ * 用法示例：
+ * - `logManager.log("hello")`
+ * - `logManager.warn("scripts", "skip", reason)`
+ *
+ * @type {SlqjLogManager}
+ */
+export const logManager = { register, get, log, info, warn, error, debug, isDebug };
+
+export default logManager;
