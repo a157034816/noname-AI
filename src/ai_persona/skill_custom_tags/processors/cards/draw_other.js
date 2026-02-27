@@ -11,7 +11,7 @@ export function createDrawOtherProcessor() {
 	// “令X摸牌”类写法：需要排除“令你摸牌”（这是自己摸牌，不应算作“令他人摸牌”）。
 	const reLingDraw = new RegExp(String.raw`令([^。]{0,30})摸${NUM}张牌`, "g");
 	const reLingDrawEach = new RegExp(String.raw`令([^。]{0,30})各摸${NUM}张牌`, "g");
-	const reLingTargetHint = /其|该角色|目标角色|目标|当前回合角色|其他角色|这些角色|所有角色|全体角色|角色|一名|至多|至少|任意/;
+	const reLingTargetHint = /其|该角色|目标角色|目标|当前回合角色|其他角色|这些角色|所有角色|全体角色|角色|一名|至多|至少|任意|伤害来源|来源|受伤角色/;
 	const reQi = new RegExp(String.raw`(?:其|该角色|目标角色|目标|当前回合角色|其他角色|这些角色)摸${NUM}张牌`);
 	const reAllEach = new RegExp(String.raw`(?:所有角色|全体角色)各摸${NUM}张牌`);
 	const reMutual = new RegExp(String.raw`你(?:与|和)[^。]{0,20}各摸${NUM}张牌`);
@@ -49,6 +49,19 @@ export function createDrawOtherProcessor() {
 
 	// 二选一写法：“令该角色摸/弃置一张牌”。
 	const reLingDrawOrDiscard = new RegExp(String.raw`令([^。]{0,30})摸\s*\/\s*弃置${NUM}张[^。]{0,10}(?:手牌|牌)`, "g");
+
+	// 获得牌（不使用“摸”字）：令他人从牌堆/弃牌堆获得牌，或直接“令其获得一张牌/手牌”。
+	const reLingGainFromPileOrDiscard = new RegExp(
+		String.raw`(?:令|使(?!用))([^。]{0,30})从(?:牌堆|弃牌堆)[^。]{0,10}获得[^。]{0,20}(?:张|【)`,
+		"g"
+	);
+	const reLingGainCard = new RegExp(
+		String.raw`(?:令|使(?!用))([^。]{0,30})获得[^。]{0,40}(?:${NUM}|一)张[^。]{0,10}(?:手牌|牌|装备牌|判定牌|基本牌|锦囊牌|【[^】]+】)`,
+		"g"
+	);
+	const reQiGainCard = new RegExp(
+		String.raw`(?:其|该角色|目标角色|目标|当前回合角色|其他角色|这些角色|所有角色|全体角色|伤害来源|来源|受伤角色)[^。]{0,10}获得[^。]{0,40}(?:${NUM}|一)张[^。]{0,10}(?:手牌|牌|装备牌|判定牌|基本牌|锦囊牌|【[^】]+】)`
+	);
 
 	/**
 	 * 判断“令X摸牌/各摸牌/摸弃二选一”是否确实作用于“他人”而非“你”。
@@ -89,16 +102,47 @@ export function createDrawOtherProcessor() {
 		return false;
 	}
 
+	/**
+	 * 判断“令X获得牌/从牌堆获得牌”是否确实作用于“他人”而非“你/自己”。
+	 *
+	 * @param {string} text
+	 * @returns {boolean}
+	 */
+	function matchesLingOtherGainCards(text) {
+		if (!text) return false;
+
+		reLingGainFromPileOrDiscard.lastIndex = 0;
+		for (let m = reLingGainFromPileOrDiscard.exec(text); m; m = reLingGainFromPileOrDiscard.exec(text)) {
+			const between = String(m[1] || "").trim();
+			if (!between) continue;
+			if (between.includes("你") || between.includes("自己")) continue;
+			if (!reLingTargetHint.test(between)) continue;
+			return true;
+		}
+
+		reLingGainCard.lastIndex = 0;
+		for (let m = reLingGainCard.exec(text); m; m = reLingGainCard.exec(text)) {
+			const between = String(m[1] || "").trim();
+			if (!between) continue;
+			if (between.includes("你") || between.includes("自己")) continue;
+			if (!reLingTargetHint.test(between)) continue;
+			return true;
+		}
+
+		return false;
+	}
+
 	return {
 		id: "draw_other",
-		description: "识别技能说明中“令其他角色摸牌/补牌”的效果",
+		description: "识别技能说明中“令其他角色摸牌/补牌/获得牌”的效果",
 		process(input) {
 			const text = input && typeof input.text === "string" ? input.text : "";
 			if (!text) return null;
-			if (!text.includes("摸") && !text.includes("补")) return null;
+			if (!text.includes("摸") && !text.includes("补") && !text.includes("获得")) return null;
 			if (
 				!(
 					matchesLingOtherDraw(text) ||
+					matchesLingOtherGainCards(text) ||
 					reQi.test(text) ||
 					reAllEach.test(text) ||
 					reMutual.test(text) ||
@@ -109,7 +153,8 @@ export function createDrawOtherProcessor() {
 					reToHandCountOther.test(text) ||
 					reToHandCountQi.test(text) ||
 					reFillToHandCountOther.test(text) ||
-					reFillToHandCountQi.test(text)
+					reFillToHandCountQi.test(text) ||
+					reQiGainCard.test(text)
 				)
 			) {
 				return null;

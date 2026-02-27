@@ -11,10 +11,12 @@ export function createActiveMaixieProcessor() {
 	// 主动卖血（示例规则）：
 	// - 出牌阶段
 	// - 你可以
-	// - 失去X点体力 / 受到X点伤害
+	// - 你失去X点体力 / 你受到X点伤害（允许跨句：如“……获得。然后……你受到X点伤害”）
 	//
 	// 说明：这是“保守起步版”的规则；后续可按需要加入更多触发时机/关键词与例外处理。
-	const re = new RegExp(String.raw`出牌阶段[^。]*你(?:可以|可)[^。]*(?:失去${NUM}点体力|受到${NUM}点伤害)`);
+	const re = new RegExp(
+		String.raw`出牌阶段[\s\S]{0,160}?你(?:可以|可)[\s\S]{0,260}?你(?:失去${NUM}点体力|受到${NUM}点伤害)`
+	);
 
 	return {
 		id: "active_maixie",

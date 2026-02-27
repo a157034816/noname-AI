@@ -334,6 +334,9 @@ export function normalizeInfoText(raw) {
 	t = t.replace(/<br\s*\/?\s*>/gi, "\n");
 	t = t.replace(/<[^>]+>/g, "");
 	t = t.replace(/&nbsp;/gi, " ");
+	// 归一化中英文标点（不同武将包/翻译风格可能混用半角分隔符）。
+	t = t.replace(/[;；]/g, "；");
+	t = t.replace(/[:：]/g, "：");
 	t = t.replace(/\s+/g, " ").trim();
 	return t;
 }

@@ -74,6 +74,28 @@ export function createDrawSelfProcessor() {
 	// 翻倍：下次摸牌翻倍/令自己本回合下次摸牌翻倍
 	const reDrawDouble = /摸牌翻倍/;
 
+	// 获得牌（不使用“摸”字）：从牌堆/弃牌堆/展示牌中取牌等，按“补牌收益”保守标注。
+	// 注意：排除“你……令/使……从牌堆获得……”这类“他人获得牌”（应由 draw_other 处理）。
+	const reGainFromPileOrDiscard = new RegExp(
+		String.raw`你(?:(?!令|使(?!用))[^。]){0,40}从(?:牌堆|弃牌堆)[^。]{0,10}获得[^。]{0,20}(?:张|【)`
+	);
+	const reThenGainFromPileOrDiscard = new RegExp(
+		String.raw`(?:然后|并|再|接着)(?:(?!令|使(?!用))[^。]){0,10}从(?:牌堆|弃牌堆)[^。]{0,10}获得[^。]{0,20}(?:张|【)`
+	);
+	const reGainDiscardPileEntered = new RegExp(String.raw`你[^。]{0,80}弃牌堆[^。]{0,60}(?:${NUM}|任意)张牌[^。]{0,20}获得`);
+	const reRevealPileTopAndGain = new RegExp(
+		String.raw`你[^。]{0,60}(?:观看|亮出|展示)牌堆顶[^。]{0,10}${NUM}张牌[^。]{0,160}获得(?:其中(?:${NUM}|一)张|所有[^。]{0,10}牌|之)`
+	);
+	const reGainTheseCards = /你[^。]{0,20}获得这些牌/;
+	const reGainAllRevealedCards = /获得所有亮出的牌/;
+	const reGainThisCard = /你[^。]{0,20}获得此牌/;
+	// “你获得一张X”通常明确为拿牌；排除“获得…角色…（手牌/牌）”一类夺牌描述（交给 gain_other_cards 处理）。
+	const reGainOneCard = new RegExp(
+		String.raw`你(?:(?!令|使(?!用))[^。]){0,10}获得(?![^。]{0,20}角色)[^。]{0,20}(?:${NUM}|一)张`
+	);
+	const reGainZhi = /你[^。]{0,20}获得之/;
+	const reZhiCardContext = /(【[^】]+】|牌堆|弃牌堆|装备区|判定牌|手牌)/;
+
 	/**
 	 * 判断“你可以/可……摸X张牌”是否为“你自摸”（排除“你可以令XXX摸牌”）。
 	 *
@@ -108,13 +130,38 @@ export function createDrawSelfProcessor() {
 		return false;
 	}
 
+	/**
+	 * 判断技能说明中是否存在“你获得（牌）”类收益（不要求使用“摸”字）。
+	 *
+	 * 说明：
+	 * - 主要用于兼容“从牌堆/弃牌堆获得…/观看牌堆顶…获得其中一张/获得这些牌/获得此牌/获得之”等翻译风格
+	 * - 尽量排除“获得技能/获得效果/获得标记”等非拿牌语义（通过“张/牌堆/弃牌堆/【】/装备区”等卡牌语境约束）
+	 *
+	 * @param {string} text
+	 * @returns {boolean}
+	 */
+	function matchesYouGainCards(text) {
+		if (!text) return false;
+		if (!text.includes("获得")) return false;
+		if (reGainFromPileOrDiscard.test(text)) return true;
+		if (reThenGainFromPileOrDiscard.test(text)) return true;
+		if (reGainDiscardPileEntered.test(text)) return true;
+		if (reRevealPileTopAndGain.test(text)) return true;
+		if (reGainTheseCards.test(text)) return true;
+		if (reGainAllRevealedCards.test(text)) return true;
+		if (reGainThisCard.test(text)) return true;
+		if (reGainOneCard.test(text) && (text.includes("牌") || text.includes("【") || text.includes("装备区") || text.includes("弃牌堆") || text.includes("牌堆"))) return true;
+		if (reGainZhi.test(text) && reZhiCardContext.test(text)) return true;
+		return false;
+	}
+
 	return {
 		id: "draw_self",
-		description: "识别技能说明中“自己摸牌/补牌”的收益",
+		description: "识别技能说明中“自己摸牌/补牌/获得牌”的收益",
 		process(input) {
 			const text = input && typeof input.text === "string" ? input.text : "";
 			if (!text) return null;
-			if (!text.includes("摸") && !text.includes("补") && !text.includes("调整")) return null;
+			if (!text.includes("摸") && !text.includes("补") && !text.includes("调整") && !text.includes("获得")) return null;
 			if (
 				!(
 					reYouDraw.test(text) ||
@@ -142,7 +189,8 @@ export function createDrawSelfProcessor() {
 					reDrawLostHpCount.test(text) ||
 					reExtraDrawPhase.test(text) ||
 					reDrawPickNumber.test(text) ||
-					reDrawDouble.test(text)
+					reDrawDouble.test(text) ||
+					matchesYouGainCards(text)
 				)
 			) {
 				return null;
