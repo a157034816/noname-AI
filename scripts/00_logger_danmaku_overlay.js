@@ -13,7 +13,7 @@ const LOG_MANAGER_REGISTER_NAME = "danmaku_overlay";
  */
 export const slqjAiScriptMeta = {
 	name: "Logger 弹幕层（AI 日志飘屏）",
-	version: "1.0.2",
+	version: "1.0.3",
 	description:
 		"启用后在屏幕叠加弹幕层；当“身临其境的AI”输出日志时，以弹幕形式从右向左飘过（支持 1~10 行配置；支持关键字白名单/黑名单过滤）。",
 };
@@ -27,6 +27,16 @@ export const slqjAiScriptConfig = {
 	version: 1,
 	items: [
 		{ key: "rows", name: "弹幕行数", type: "number", default: 6, min: 1, max: 10, step: 1 },
+		{
+			key: "speed",
+			name: "滚动速度倍率",
+			type: "number",
+			default: 1,
+			min: 0.2,
+			max: 5,
+			step: 0.1,
+			description: "弹幕滚动速度倍率：1=默认；>1 更快；<1 更慢（仅影响滚动速度，不影响文本长度相关的时长计算）。",
+		},
 		{
 			key: "whitelist",
 			name: "白名单关键字",
@@ -59,14 +69,20 @@ export default function setup(ctx) {
 	if (existing && existing.installed) return;
 
 	const rows = clampInt(ctx?.scriptConfig?.rows, 6, 1, 10);
+	const speed = clampNumber(
+		typeof ctx?.scriptConfig?.speed === "number" && Number.isFinite(ctx.scriptConfig.speed) ? ctx.scriptConfig.speed : 1,
+		0.2,
+		5
+	);
 	const whitelist = parseKeywordLines(ctx?.scriptConfig?.whitelist);
 	const blacklist = parseKeywordLines(ctx?.scriptConfig?.blacklist);
 	const logger = safeGetConsoleLogger();
 
-	/** @type {{installed:boolean, rows:number, whitelist:string[], blacklist:string[], pending:Array<{text:string, level:string}>, overlay:HTMLElement|null, lane:number}} */
+	/** @type {{installed:boolean, rows:number, speed:number, whitelist:string[], blacklist:string[], pending:Array<{text:string, level:string}>, overlay:HTMLElement|null, lane:number}} */
 	const state = {
 		installed: true,
 		rows,
+		speed,
 		whitelist,
 		blacklist,
 		pending: [],
@@ -574,6 +590,7 @@ function emitDanmaku(state, text, level) {
 		level: String(level || "log"),
 		rows: clampInt(state?.rows, 6, 1, 10),
 		rowIndex: nextLane(state),
+		speed: typeof state?.speed === "number" && Number.isFinite(state.speed) ? state.speed : 1,
 	});
 }
 
@@ -610,7 +627,7 @@ function flushPending(state) {
 
 /**
  * @param {HTMLElement} overlay
- * @param {{text:string, level:string, rows:number, rowIndex:number}} args
+ * @param {{text:string, level:string, rows:number, rowIndex:number, speed?:number}} args
  * @returns {void}
  */
 function createDanmakuItem(overlay, args) {
@@ -658,7 +675,9 @@ function createDanmakuItem(overlay, args) {
 		const distance = Math.max(1, w + ew + 24);
 		el.style.setProperty("--slqj-ai-danmaku-distance", `-${Math.floor(distance)}px`);
 
-		const dur = clampNumber(6 + text.length * 0.08, 6, 16);
+		const speed = clampNumber(typeof args?.speed === "number" && Number.isFinite(args.speed) ? args.speed : 1, 0.2, 5);
+		const baseDur = clampNumber(6 + text.length * 0.08, 6, 16);
+		const dur = baseDur / speed;
 		el.style.setProperty("--slqj-ai-danmaku-duration", `${dur.toFixed(2)}s`);
 	} catch (e) {}
 
