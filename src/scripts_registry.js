@@ -13,6 +13,8 @@ const DEFAULT_SCRIPTS_DIR = `extension/${EXTENSION_NAME}/scripts`;
 const DEFAULT_DISABLED = {
   // 该脚本会在屏幕叠加弹幕层（偏“刷屏/表现层”）；默认禁用，避免影响未配置用户的体验。
   "00_logger_danmaku_overlay.js": true,
+  // 该脚本会将 logManager 日志转发到游戏内 game.log（可能刷屏）；默认禁用，避免影响对局体验。
+  "03_logger_forward_game_log.js": true,
 };
 
 /**
@@ -62,9 +64,18 @@ export function normalizeScriptsRegistry(files, registry) {
   const base = normalizeRegistryShape(registry);
 
   const order = [];
+  // 记录“用户注册表中已出现过”的脚本：用于判断“新增脚本”是否需要套用默认禁用策略。
+  // - 出现在 order：说明用户至少保存过一次顺序（或由 UI 归一化后落盘）
+  // - 出现在 disabled：说明用户明确禁用过（即便 order 里暂缺也视为已知）
+  const known = new Set();
   for (const f of base.order || []) {
     const name = String(f || "");
     if (fileSet.has(name) && !order.includes(name)) order.push(name);
+    if (name) known.add(name);
+  }
+  for (const k of Object.keys(base.disabled || {})) {
+    const name = String(k || "");
+    if (name) known.add(name);
   }
 
   const remaining = Array.from(fileSet).filter((f) => !order.includes(f)).sort((a, b) => a.localeCompare(b));
@@ -75,6 +86,14 @@ export function normalizeScriptsRegistry(files, registry) {
   for (const [k, v] of Object.entries(base.disabled || {})) {
     const name = String(k || "");
     if (fileSet.has(name) && v) disabled[name] = true;
+  }
+
+  // 对“新增脚本”套用默认禁用策略：
+  // - 仅当脚本在用户注册表中从未出现过（unknown）时才应用 DEFAULT_DISABLED
+  // - 避免“用户之前手动启用过默认禁用脚本，但升级后又被强制禁用”的体验问题
+  for (const f of remaining) {
+    if (known.has(f)) continue;
+    if (DEFAULT_DISABLED && DEFAULT_DISABLED[f]) disabled[f] = true;
   }
 
   return { version: 1, order, disabled };
