@@ -777,11 +777,13 @@ function safeNewUrl(rel, base) {
 /**
  * 创建并挂载模态 UI 外壳。
  *
- * @param {{title:string, subtitle?:string, ui?: any}} opts
+ * @param {{title:string, subtitle?:string, ui?: any, rootId?: string}} opts
+ * @param {string=} opts.rootId 可选：自定义根节点 id（用于在同一页面上区分多个不同模态，避免互相覆盖）
  * @returns {{ shadow: ShadowRoot, close: Function, setStatus: (text: string) => void }}
  */
 export function createModalShell(opts) {
-  const existing = document.getElementById(ROOT_ID);
+  const rootId = String(opts?.rootId || ROOT_ID);
+  const existing = document.getElementById(rootId);
   if (existing) {
     try {
       existing.remove();
@@ -791,7 +793,7 @@ export function createModalShell(opts) {
   // 通过 Shadow DOM 隔离全局样式污染（避免出现“元素重叠/布局错乱”）
   // 同时可用 :host 直接样式化遮罩层（避免额外全局 CSS）。
   const backdrop = document.createElement("div");
-  backdrop.id = ROOT_ID;
+  backdrop.id = rootId;
   // 兜底：项目全局 CSS 里对 div 有 position/transition 的默认样式
   // 移动端/缩放环境下 fixed/inset 可能出现“遮罩缩角”，因此这里使用 vw/vh 并配合 transform 补偿兜底。
   try {

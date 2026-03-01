@@ -5,6 +5,7 @@ import { installSkillCustomTags } from "./src/ai_persona/skill_custom_tags/index
 import { installVisualDebug } from "./src/visual_debug/index.js";
 import { loadExtensionScripts } from "./src/scripts_loader.js";
 import { openScriptsPluginManagerModal } from "./src/scripts_manager_modal.js";
+import { installAiDecisionStatsUi } from "./src/decision_stats_ui.js";
 import { maybeAutoCheckForUpdates } from "./src/update/auto_check.js";
 import { openUpdateModal } from "./src/update/update_modal.js";
 import logManager from "./src/logger/manager.js";
@@ -28,11 +29,16 @@ export const type = "extension";
 export default function(){
 			return {name:"身临其境的AI",editable:true,connect:false,
 		/**
-		 * 场景就绪回调（预留）。
+		 * 场景就绪回调：注入“AI决策”入口与统计回传（暂停快捷菜单）。
 		 * @returns {void}
 		 */
 		arenaReady:function(){
-    
+			try{
+				if(_status&&_status.connectMode) return;
+				installAiDecisionStatsUi({ lib, game, ui, get });
+			}catch(e){
+				logManager.error("decision_stats", "installAiDecisionStatsUi failed", e);
+			}
 },
 		/**
 		 * 扩展内容定义（预留）。
