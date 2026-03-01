@@ -3887,6 +3887,8 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 								if (overflow <= 0 && hand > 0 && hand <= 2) delta = 0.7;
 								if (overflow >= 1) delta -= 0.8;
 							}
+							const base = typeof ctx.base === "number" && !Number.isNaN(ctx.base) ? ctx.base : 0;
+							if (base <= 0 && delta > 0) delta = 0;
 							ctx.score += delta;
 							return;
 						}
