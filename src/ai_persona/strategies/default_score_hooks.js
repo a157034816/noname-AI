@@ -4068,6 +4068,40 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 					// 装备区：优先拆敌方高价值装备（关键装备）
 					if (pos === "e") {
 						const name = String(link?.name || "");
+
+						// 白银狮子例外：敌方受伤且会因此回复时，若还有其它可选牌则尽量不要拆/顺（避免“帮敌回血”）
+						if (att < 0 && name === "baiyin" && owner) {
+							let damaged = false;
+							try {
+								if (typeof owner?.isDamaged === "function") damaged = !!owner.isDamaged();
+								else {
+									const hp = owner?.hp;
+									const maxHp = owner?.maxHp;
+									if (typeof hp === "number" && typeof maxHp === "number" && hp < maxHp) damaged = true;
+								}
+							} catch (e) {
+								damaged = false;
+							}
+							if (damaged) {
+								let canRecover = true;
+								if (typeof get?.recoverEffect === "function") {
+									try {
+										canRecover = get.recoverEffect(owner, player, player) > 0;
+									} catch (e) {
+										canRecover = true;
+									}
+								}
+								if (canRecover) {
+									const all = Array.isArray(ctx.all) ? ctx.all : [];
+									const hasOther = all.some(btn => btn && btn.link && btn.link !== link);
+									if (hasOther) {
+										ctx.score = Math.min(ctx.score, -0.15);
+										return;
+									}
+								}
+							}
+						}
+
 						if (att < -0.6 && name === "zhuge") ctx.score += 0.45;
 						if (owner && typeof get?.value === "function") {
 							try {
