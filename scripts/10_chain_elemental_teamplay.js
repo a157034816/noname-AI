@@ -1,7 +1,7 @@
 import { isLocalAIPlayer } from "../src/ai_persona/lib/utils.js";
 import { guessIdentityFor } from "../src/ai_persona/guess_identity.js";
 
-// 注意：该脚本默认关闭，需要在“脚本插件管理 -> 配置(⚙)”里手动启用。
+// 注意：该脚本默认禁用；需在“脚本插件管理”列表中启用后才会加载。
 
 /**
  * @typedef {import("../src/scripts_loader.js").SlqjAiScriptContext} SlqjAiScriptContext
@@ -26,21 +26,14 @@ export const slqjAiScriptMeta = {
  * scripts 插件配置（用于“脚本插件管理 -> 配置(⚙)”）。
  *
  * 说明：
- * - `enabled=false` 时脚本不安装任何 hook/skill（完全不生效）
- * - 其余字段会在脚本安装时写入 runtime.cfg（仅影响本局）
+ * - 启用/禁用：由“脚本插件管理”列表的开关控制（禁用脚本将不会被加载）
+ * - 其余字段：在脚本安装时写入 runtime.cfg（仅影响本局）
  *
  * @type {{version:1, items:Array<any>}}
  */
 export const slqjAiScriptConfig = {
 	version: 1,
 	items: [
-		{
-			key: "enabled",
-			name: "启用（默认关闭）",
-			type: "boolean",
-			default: false,
-			description: "开启后才会安装投花确认与铁索传导策略（保存后建议重启生效）。",
-		},
 		{
 			key: "useDebugPresetLow",
 			name: "调试：一键降低门槛",
@@ -1541,7 +1534,6 @@ export default function setup(ctx) {
 	if (_status.connectMode) return;
 
 	const scriptCfg = (ctx && ctx.scriptConfig) || {};
-	if (scriptCfg.enabled !== true) return;
 
 	const runtime = getOrCreateRuntime(game);
 	if (!runtime) return;

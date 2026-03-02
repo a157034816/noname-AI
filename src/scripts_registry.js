@@ -15,6 +15,8 @@ const DEFAULT_DISABLED = {
   "00_logger_danmaku_overlay.js": true,
   // 该脚本会将 logManager 日志转发到游戏内 game.log（可能刷屏）；默认禁用，避免影响对局体验。
   "03_logger_forward_game_log.js": true,
+  // 该脚本会显著改变队友协作策略（投花确认 + 铁索传导连招）；默认禁用，避免无意影响对局体验。
+  "10_chain_elemental_teamplay.js": true,
 };
 
 /**
