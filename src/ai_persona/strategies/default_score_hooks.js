@@ -224,7 +224,7 @@ function getRenwangShieldType(target, get) {
  * @returns {boolean}
  */
 function isShaIneffectiveAgainstRenwang(shaCard, shieldType, get) {
-	if (!shaCard || String(shaCard?.name || "") !== "sha") return false;
+	if (!shaCard || String(shaCard?.name || shaCard?.viewAs || "") !== "sha") return false;
 	if (!shieldType) return false;
 
 	const color = safeGetColor(shaCard, get);
@@ -233,6 +233,26 @@ function isShaIneffectiveAgainstRenwang(shaCard, shieldType, get) {
 	// rewrite_renwang：黑色/红桃杀无效（只有方块杀稳定有效）
 	const suit = safeGetSuit(shaCard, get);
 	return color === "black" || suit === "heart";
+}
+
+/**
+ * 判断【杀】是否存在“无视防具”的例外（用于避免误判仁王盾/仁王金刚盾的无效杀）。
+ *
+ * 说明：
+ * - 引擎层面对防具无视主要通过 source.hasSkillTag("unequip", false, {name,target,card}) 判定
+ * - 同时兼容 unequip_ai（部分扩展/AI 口径会用该 tag 反映“视为无视防具”）
+ *
+ * @param {*} source
+ * @param {*} target
+ * @param {*} shaCard
+ * @returns {boolean}
+ */
+function isRenwangShieldBypassedBySource(source, target, shaCard) {
+	if (!source || !target || !shaCard) return false;
+	const name = String(shaCard?.name || shaCard?.viewAs || "");
+	/** @type {any} */
+	const arg = { name: name || null, target: target, card: shaCard };
+	return safeHasSkillTag(source, "unequip", false, arg) || safeHasSkillTag(source, "unequip_ai", false, arg);
 }
 
 /**
@@ -2735,6 +2755,16 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 						if (!forcedTarget) return;
 						if (typeof get?.itemtype === "function" && get.itemtype(forcedTarget) !== "player") return;
 
+						// 仁王盾/仁王金刚盾：对无效【杀】直接禁用（避免“明知无效还浪费杀”）
+						// - 例外：若本次【杀】存在“无视防具”的情况，则不禁用
+						const shieldType0 = getRenwangShieldType(forcedTarget, get);
+						if (shieldType0 && isShaIneffectiveAgainstRenwang(card, shieldType0, get)) {
+							if (!isRenwangShieldBypassedBySource(player, forcedTarget, card)) {
+								ctx.score -= 9999;
+								return;
+							}
+						}
+
 						const attToVictim = safeAttitude(get, player, forcedTarget);
 						if (attToVictim > 0.3) {
 							// 不对友方出杀：宁可交武器也不误伤
@@ -2778,7 +2808,11 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 
 									// 若这张【杀】对“仁王盾/仁王金刚盾”目标无效，则更倾向不出杀直接交武器（避免浪费无效杀）。
 									const shieldType = getRenwangShieldType(forcedTarget, get);
-									if (shieldType && isShaIneffectiveAgainstRenwang(card, shieldType, get)) {
+									if (
+										shieldType &&
+										isShaIneffectiveAgainstRenwang(card, shieldType, get) &&
+										!isRenwangShieldBypassedBySource(player, forcedTarget, card)
+									) {
 										donateBenefit += 0.75;
 									}
 
@@ -4483,6 +4517,37 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				ctx.score -= 6;
 			},
 			{ priority: 5, title: "默认策略：锦囊目标安全（敌/友）" }
+		);
+	}
+
+	// 通用策略：避免无效出杀（仁王盾/仁王金刚盾）
+	// - 目标装备盾且本次【杀】按颜色/花色会被抵消时，直接禁用该目标候选
+	// - 例外：若本次【杀】存在“无视防具”的情况，则不禁用
+	if (!game.__slqjAiPersona._shaAvoidIneffectiveRenwangHookInstalled) {
+		game.__slqjAiPersona._shaAvoidIneffectiveRenwangHookInstalled = true;
+		hooks.on(
+			"slqj_ai_score",
+			ctx => {
+				if (!ctx || ctx.kind !== "chooseTarget" || ctx.stage !== "final") return;
+				if (typeof get?.itemtype === "function" && get.itemtype(ctx.candidate) !== "player") return;
+				const source = ctx.player;
+				const target = ctx.candidate;
+				if (!source || !target) return;
+				if (!isUseCardContext(ctx.event)) return;
+
+				const card = findEventCard(ctx.event);
+				if (!card) return;
+				const name = String(card?.name || card?.viewAs || "");
+				if (name !== "sha") return;
+
+				const shieldType = getRenwangShieldType(target, get);
+				if (!shieldType) return;
+				if (!isShaIneffectiveAgainstRenwang(card, shieldType, get)) return;
+				if (isRenwangShieldBypassedBySource(source, target, card)) return;
+
+				ctx.score -= 9999;
+			},
+			{ priority: 0, title: "通用策略：避免无效杀（仁王盾）" }
 		);
 	}
 
