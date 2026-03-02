@@ -139,7 +139,6 @@ Schema 示例：
 export const slqjAiScriptConfig = {
   version: 1,
   items: [
-    { key: "enabled", name: "启用", type: "boolean", default: false },
     { key: "chance", name: "概率", type: "number", default: 0.5, min: 0, max: 1, step: 0.05 },
     { key: "mode", name: "模式", type: "select", default: "A", options: [{ value: "A", label: "A" }, { value: "B", label: "B" }] },
     { key: "keywords", name: "关键字", type: "textarea", default: "", description: "每行一个关键字" },
@@ -251,8 +250,10 @@ HookBus 支持 `priority`（越大越先执行）：
   - `poolRatio`: `0.5`
 - `02_dianjiangchun_ai_ban_choose_character.js`
   - `verboseLog`: `false`
+- `03_logger_forward_game_log.js`（默认禁用）
+  - `whitelist`: `"[身临其境的AI]"`
+  - `blacklist`: `"[runForSkillIds]\n[attitude]"`
 - `10_chain_elemental_teamplay.js`（默认关闭）
-  - `enabled`: `false`
   - `useDebugPresetLow`: `false`
   - `enemyHandMin`: `3`
   - `allyAttitudeMin`: `3`
@@ -270,6 +271,8 @@ HookBus 支持 `priority`（越大越先执行）：
   - `autoAckDelayMs`: `300`
   - `enemyDamageEffectMin`: `0.6`
   - `allyDamageEffectMin`: `-0.8`
+- `11_compare_pindian_card_choice.js`
+  - `friendAttitudeMin`: `0`
 - `20_peixiu_takeover.js`
   - `enableGreedyLookahead`: `true`
   - `greedyLookaheadMode`: `"A"`
@@ -658,6 +661,49 @@ HookBus 支持 `priority`（越大越先执行）：
 示例（当前内置）：
 
 - 黄盖 `kurou`（苦肉）：`slqj_ai_maixie` + `slqj_ai_active_maixie` + `slqj_ai_draw_self`
+
+---
+
+### 6.11 `03_logger_forward_game_log.js`：Logger 转发到 game.log
+
+元信息：
+
+- name：Logger 转发到 game.log
+- version：1.0.1
+- 作用：把“身临其境的AI”的 logManager 输出转发为引擎 `game.log(...)`（仅本地/非联机/非connectMode 生效）
+
+接入点：
+
+- 注册一个 logManager logger，并在 logger 输出时写入 `game.log(...)`（不改变 AI 行为）
+
+可调参数（⚙）：
+
+- `whitelist`：白名单关键字（多行，每行一个；默认 `"[身临其境的AI]"`；留空=不输出任何转发日志）
+- `blacklist`：黑名单关键字（多行，每行一个；默认 `"[runForSkillIds]\n[attitude]"`；命中则不输出，且优先于白名单）
+
+---
+
+### 6.12 `11_compare_pindian_card_choice.js`：拼点被发起人让点/争点
+
+元信息：
+
+- name：拼点：被发起人让点/争点
+- version：1.0.0
+- 作用：当 AI 作为拼点的被发起人时：若对发起人态度为友方则总选点数更小的牌；否则总选点数更大的牌
+
+接入点：
+
+- 订阅 `slqj_ai_score`（chooseCard 上下文），仅在 `event.type === "compare"` 且 `被发起人 !== 发起人` 时生效
+
+策略要点：
+
+- 队友判定：`get.attitude(被发起人, 发起人) > friendAttitudeMin`
+- 若队友：按“点数更小”优先选牌；若敌对：按“点数更大”优先选牌
+- 同点数时用 `get.value` 做稳定 tie-break（优先牺牲低价值牌，不改变点数主序）
+
+可调参数（⚙）：
+
+- `friendAttitudeMin`：友方阈值（默认 `0`）
 
 ---
 
