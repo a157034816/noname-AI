@@ -189,6 +189,53 @@ function safeGetWeaponCard(player, get) {
 }
 
 /**
+ * 识别目标是否装备了“仁王盾/仁王金刚盾”（装备名：renwang / rewrite_renwang）。
+ *
+ * @param {*} target
+ * @param {*} get
+ * @returns {("renwang"|"rewrite_renwang")|null}
+ */
+function getRenwangShieldType(target, get) {
+	if (!target) return null;
+	try {
+		if (typeof target?.hasSkillTag === "function" && target.hasSkillTag("unequip2")) return null;
+	} catch (e) {
+		// ignore
+	}
+
+	const equips = safeGetCards(target, "e");
+	for (const c of equips) {
+		const name = String(c?.name || "");
+		if (name === "renwang" || name === "rewrite_renwang") return /** @type {any} */ (name);
+	}
+	return null;
+}
+
+/**
+ * 判断【杀】在“仁王盾/仁王金刚盾”存在时是否大概率无效（仅按颜色/花色做轻量判断）。
+ *
+ * 规则：
+ * - renwang：黑色【杀】无效
+ * - rewrite_renwang：黑色【杀】与红桃【杀】无效（等价于非方块【杀】无效）
+ *
+ * @param {*} shaCard
+ * @param {("renwang"|"rewrite_renwang")|null} shieldType
+ * @param {*} get
+ * @returns {boolean}
+ */
+function isShaIneffectiveAgainstRenwang(shaCard, shieldType, get) {
+	if (!shaCard || String(shaCard?.name || "") !== "sha") return false;
+	if (!shieldType) return false;
+
+	const color = safeGetColor(shaCard, get);
+	if (shieldType === "renwang") return color === "black";
+
+	// rewrite_renwang：黑色/红桃杀无效（只有方块杀稳定有效）
+	const suit = safeGetSuit(shaCard, get);
+	return color === "black" || suit === "heart";
+}
+
+/**
  * 估算玩家“失去武器后会被卡距离”的风险（轻量启发式）。
  *
  * 规则（按“卡距离=范围内没有可攻击目标”）：
@@ -424,6 +471,26 @@ function safeGetColor(card, get) {
 		}
 	}
 	return typeof card.color === "string" ? card.color : "";
+}
+
+/**
+ * 安全读取卡牌花色（缺失时回退空字符串）。
+ *
+ * @param {*} card
+ * @param {*} get
+ * @returns {string}
+ */
+function safeGetSuit(card, get) {
+	if (!card) return "";
+	if (typeof get?.suit === "function") {
+		try {
+			const v = get.suit(card);
+			return typeof v === "string" ? v : "";
+		} catch (e) {
+			// ignore
+		}
+	}
+	return typeof card.suit === "string" ? card.suit : "";
 }
 
 /**
@@ -2709,6 +2776,12 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 									const delta = vToSource - vToMe;
 									if (delta > 0.5) donateBenefit += clampNumber(delta, 0, 4) * 0.18;
 
+									// 若这张【杀】对“仁王盾/仁王金刚盾”目标无效，则更倾向不出杀直接交武器（避免浪费无效杀）。
+									const shieldType = getRenwangShieldType(forcedTarget, get);
+									if (shieldType && isShaIneffectiveAgainstRenwang(card, shieldType, get)) {
+										donateBenefit += 0.75;
+									}
+
 									if (donateBenefit >= 1.1) {
 										ctx.score -= 2.4;
 										return;
@@ -3642,6 +3715,13 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 								}
 							}
 
+							// 2.5) 借友军刀拿武器：addedTarget 优先选“带仁王盾”的敌人（提高“不出杀→交武器”的稳定性）
+							if (preToMe > 0.3 && enemyLike) {
+								const shieldType = getRenwangShieldType(target, get);
+								if (shieldType === "rewrite_renwang") ctx.score += 0.95;
+								else if (shieldType === "renwang") ctx.score += 0.75;
+							}
+
 							// 3) 轻量偏向明确敌对目标；中立目标更保守（避免“乱借刀乱砍”）
 							if (enemyLike) ctx.score += 0.55;
 							else ctx.score -= 0.2;
@@ -3662,6 +3742,27 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 								}
 							} catch (e) {
 								// ignore
+							}
+
+							// 约束：敌方若存在可借的武器目标，则不向友军借刀拿武器（避免“有更优解还动队友装备”）
+							let hasEnemyWeapon = false;
+							for (const p of game.players || []) {
+								if (!p || p === player) continue;
+								try {
+									if (typeof p.isDead === "function" && p.isDead()) continue;
+								} catch (e) {
+									// ignore
+								}
+								const att2 = safeAttitude(get, player, p);
+								if (att2 >= -0.3) continue;
+								if (safeGetWeaponCard(p, get)) {
+									hasEnemyWeapon = true;
+									break;
+								}
+							}
+							if (hasEnemyWeapon) {
+								ctx.score -= 9999;
+								return;
 							}
 
 							// 允许“借友军的刀”，但前提：
