@@ -31,6 +31,24 @@ export const slqjAiScriptMeta = {
 	description: "检测点绛唇启用后，把 AI 禁将从 gameStart 提前到选将阶段：AI候选中若出现“AI禁用”武将则自动重抽替换，直到候选不含禁将。",
 };
 
+/**
+ * scripts 插件配置（用于“脚本插件管理 -> 配置(⚙)”）。
+ *
+ * @type {{version:1, items:Array<{key:string,name:string,type:"boolean",default:boolean,description?:string}>}}
+ */
+export const slqjAiScriptConfig = {
+	version: 1,
+	items: [
+		{
+			key: "verboseLog",
+			name: "详细日志",
+			type: "boolean",
+			default: false,
+			description: "开启后输出更详细的调试日志（也可通过 dev 或 slqj_ai_scripts_debug 触发）。",
+		},
+	],
+};
+
 export default function setupDianjiangchunAiBanChooseCharacter(ctx) {
 	const game = ctx && ctx.game;
 	const lib = ctx && ctx.lib;
@@ -40,7 +58,7 @@ export default function setupDianjiangchunAiBanChooseCharacter(ctx) {
 	if (game.__slqjAiDjcAiBanChooseCharacterInstalled) return;
 	game.__slqjAiDjcAiBanChooseCharacterInstalled = true;
 
-	const logger = createLogger(lib);
+	const logger = createLogger(lib, (ctx && ctx.scriptConfig) || null);
 	logger.info("init");
 
 	try {
@@ -143,7 +161,7 @@ function wrapBaseAi(baseAi, env) {
 			// 这里对本次调用涉及到的 key 做一次临时过滤，确保随机替换不会落到禁将上。
 			restoreCharacterReplace = patchCharacterReplaceForCall(env.lib, bannedSet, env.get, list, list2, back);
 
-			// 常见口径：AI 候选在 list，候选池在 back（可“换入换出”保持总量不变）
+			// 常见规则：AI 候选在 list，候选池在 back（可“换入换出”保持总量不变）
 			if (Array.isArray(list) && Array.isArray(back)) {
 				const ok = rerollCandidatesUntilSafe(list, back, bannedSet, env);
 				if (ok) return baseAi.apply(this, arguments);
@@ -158,7 +176,7 @@ function wrapBaseAi(baseAi, env) {
 			const hasList = Array.isArray(list);
 			const hasList2 = Array.isArray(list2);
 
-			// 兼容口径：部分模式只给 list（无 back），或将主公候选放在 list2
+			// 兼容规则：部分模式只给 list（无 back），或将主公候选放在 list2
 			if (hasList || hasList2) {
 				const safeList = hasList ? filterSafeCandidates(list, bannedSet, env.get) : list;
 				const safeList2 = hasList2 ? filterSafeCandidates(list2, bannedSet, env.get) : list2;
@@ -231,7 +249,7 @@ function isDianjiangchunEnabled(game, lib) {
 		if (!exts.includes("点绛唇")) return false;
 		// 点绛唇启用开关可能未写入（未显式设置）：
 		// - 显式 false：视为禁用
-		// - true/undefined/其他：视为启用（与引擎 hasExtension 的默认口径一致，但避免写配置副作用）
+		// - true/undefined/其他：视为启用（与引擎 hasExtension 的默认规则一致，但避免写配置副作用）
 		const flag = lib.config ? lib.config["extension_点绛唇_enable"] : undefined;
 		return flag !== false;
 	} catch (e) {}
@@ -443,11 +461,12 @@ function pickRandomReplacementIndex(pool, list, bannedSet, get, allowDuplicate) 
 
 /**
  * @param {*} lib
+ * @param {any} cfg
  * @returns {{isVerbose:boolean,info:Function,warn:Function,debug:Function}}
  */
-function createLogger(lib) {
+function createLogger(lib, cfg) {
 	const prefix = "[身临其境的AI][scripts][dianjiangchun_ai_ban_choose_character]";
-	const isVerbose = !!(lib && lib.config && (lib.config.dev || lib.config.slqj_ai_scripts_debug));
+	const isVerbose = !!(cfg && cfg.verboseLog) || !!(lib && lib.config && (lib.config.dev || lib.config.slqj_ai_scripts_debug));
 	function out(level, args) {
 		try {
 			const fn = console && console[level] ? console[level] : console.log;

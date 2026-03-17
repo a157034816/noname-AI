@@ -114,7 +114,6 @@
 - `_equipHoldInHandHookInstalled`
 - `_wuxieKeepPriorityHookInstalled`
 - `_basicCardGeneralTipsHookInstalled`
-- `_shaTempoInferenceHookInstalled`
 - `_handStoragePriorityHookInstalled`
 - `_rageBiasHookInstalled`
 - `_immediateUseValueHookInstalled`
@@ -181,13 +180,13 @@
 - 若候选是 `wuxie`：显著降低其“被弃置”的评分（即更不愿弃无懈）
 - 对 `tao` 有少数例外：自身濒死/极低血线时桃更关键
 
-### 5.5 基本牌通用技巧：留闪/卖血保杀/酒的时机
+### 5.5 基本牌通用策略：留闪/卖血保杀/酒的时机
 （`_basicCardGeneralTipsHookInstalled`）
 
 这一组规则覆盖多个上下文：
 
 1) **弃牌**：回合外更需要基本牌  
-   - 最后一闪更难弃（并结合“敌方杀密度推断”进一步强化）
+   - 最后一闪更难弃
    - 杀稀缺时更保留；并按火/雷/红/黑做“先丢谁”的倾向
    - 酒重复时更愿意丢（酒一回合只能喝一次）
 
@@ -198,15 +197,6 @@
 3) **出牌阶段**：酒的时机按本局 habit 分流  
    - `habits.jiuSearchSha=conservative`：手里没杀就不空喝酒
    - `heuristic`：允许“先喝酒再找牌”，但要求存在过牌候选作为“找牌载体”，且桌上确有明显敌对目标
-
-### 5.6 基本牌节奏推断落地：优先控“杀密度更高”的敌人
-（`_shaTempoInferenceHookInstalled`）
-
-当扩展从公开信息推断“某敌人杀出得早→杀更多”（见 `basic_tempo_events.js`）后：
-
-- 在使用 `lebu/bingliang/guohe/shunshou` 等控场/拆迁牌选目标时
-- 对“杀密度更高”的敌对目标做小幅加权
-- 但当基础收益已经很高（base>=4.5）时不再额外干预，避免推翻明显最优解
 
 ### 5.7 “刚刚被我攻击的人我不救”
 （`_noRescueRecentAttackHookInstalled`）
@@ -260,6 +250,7 @@
 - 行为：对【杀】出牌做轻度抬权，并在选目标时允许把“开路盟友”作为目标
 - 顺风约束：顺风（局势指数>0.22）默认不乱斩友；除非下家敌人是主公（击杀即终局）
 - 身份局约束：不会把主公当作“开路盟友”
+- 身份局约束：若出牌者为主公，则不会为了开路去斩忠臣/明忠（避免主公杀忠惩罚）
 
 ---
 

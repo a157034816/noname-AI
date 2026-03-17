@@ -14,7 +14,7 @@
 import { SkillCustomTagStore } from "./store.js";
 import { SkillTagProcessorFramework } from "./framework.js";
 import { createBuiltinSkillTagTextProcessors } from "./processors/index.js";
-import { get as getLogger } from "../../logger/manager.js";
+import logManager from "../../logger/manager.js";
 
 export function installSkillCustomTags(ctx) {
 	const game = ctx && ctx.game;
@@ -280,7 +280,7 @@ function ensureSkill(lib, name, def) {
  */
 function createLogger(lib) {
 	const isVerbose = !!(lib && lib.config && lib.config.dev);
-	const base = getLogger("console");
+	const base = logManager;
 
 	const normalizeSubFeature = (f) => String(f == null ? "" : f).trim();
 

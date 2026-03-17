@@ -16,6 +16,22 @@ export const slqjAiScriptMeta = {
 		"仅对界沮授（xin_jushou）生效：出牌阶段尽可能选择与上一张牌点数/花色相同的出牌序列，以更频繁触发「渐营」（xinjianying_draw）摸牌。",
 };
 
+/**
+ * scripts 插件配置（用于“脚本插件管理 -> 配置(⚙)”）。
+ *
+ * @type {{version:1, items:Array<any>}}
+ */
+export const slqjAiScriptConfig = {
+	version: 1,
+	items: [
+		{ key: "hookPriority", name: "Hook 优先级", type: "number", default: 2, min: -1000, max: 1000, step: 1 },
+		{ key: "debug", name: "调试日志", type: "boolean", default: false, description: "也可通过 dev 或控制台开关启用。" },
+		{ key: "matchBonus", name: "触发加权", type: "number", default: 2.4, min: -999, max: 999, step: 0.1 },
+		{ key: "setupBonus", name: "铺垫加权", type: "number", default: 0.8, min: -999, max: 999, step: 0.1 },
+		{ key: "badMetaPenalty", name: "元信息缺失惩罚", type: "number", default: 0.6, min: -999, max: 999, step: 0.1 },
+	],
+};
+
 const GENERAL_KEY = "xin_jushou";
 
 /**
@@ -23,8 +39,6 @@ const GENERAL_KEY = "xin_jushou";
  *
  * @type {{
  *  hookPriority:number,
- *  onlyLocalAi:boolean,
- *  affectManagedMe:boolean,
  *  debug:boolean,
  *  matchBonus:number,
  *  setupBonus:number,
@@ -33,8 +47,6 @@ const GENERAL_KEY = "xin_jushou";
  */
 const DEFAULT_CFG = {
 	hookPriority: 2,
-	onlyLocalAi: true,
-	affectManagedMe: true,
 	debug: false,
 	matchBonus: 2.4,
 	setupBonus: 0.8,
@@ -56,6 +68,11 @@ export default function setup(ctx) {
 	if (!runtime || runtime.installed) return;
 	runtime.installed = true;
 	runtime._status = _status || null;
+
+	try {
+		const scriptCfg = (ctx && ctx.scriptConfig) || {};
+		runtime.cfg = normalizeCfg({ ...runtime.cfg, ...scriptCfg });
+	} catch (e) {}
 
 	try {
 		runtime.cfg.debug =
@@ -94,8 +111,6 @@ function getOrCreateRuntime(game) {
 function normalizeCfg(input) {
 	const cfg = input && typeof input === "object" ? { ...DEFAULT_CFG, ...input } : { ...DEFAULT_CFG };
 	if (typeof cfg.hookPriority !== "number") cfg.hookPriority = DEFAULT_CFG.hookPriority;
-	if (typeof cfg.onlyLocalAi !== "boolean") cfg.onlyLocalAi = DEFAULT_CFG.onlyLocalAi;
-	if (typeof cfg.affectManagedMe !== "boolean") cfg.affectManagedMe = DEFAULT_CFG.affectManagedMe;
 	if (typeof cfg.debug !== "boolean") cfg.debug = DEFAULT_CFG.debug;
 	if (typeof cfg.matchBonus !== "number") cfg.matchBonus = DEFAULT_CFG.matchBonus;
 	if (typeof cfg.setupBonus !== "number") cfg.setupBonus = DEFAULT_CFG.setupBonus;
@@ -140,18 +155,9 @@ function shouldAffectPlayer(player, game, runtime, _status) {
 	if (!player) return false;
 	if (!isXinJushouPlayer(player)) return false;
 
-	// 玩家本人（game.me）：默认不影响手操；仅在“托管”时允许接管（可通过 affectManagedMe 关闭）。
-	if (player === game?.me) {
-		if (!runtime?.cfg?.affectManagedMe) return false;
-		const st = _status || runtime?._status || globalThis._status;
-		if (!isLocalAIPlayer(player, game, st)) return false;
-		return true;
-	}
-
-	if (runtime?.cfg?.onlyLocalAi) {
-		const st = _status || runtime?._status || globalThis._status;
-		if (!isLocalAIPlayer(player, game, st)) return false;
-	}
+	const st = _status || runtime?._status || globalThis._status;
+	// 默认仅本地 AI 生效；玩家本人（game.me）仅在“托管”时视为本地 AI
+	if (!isLocalAIPlayer(player, game, st)) return false;
 	return true;
 }
 

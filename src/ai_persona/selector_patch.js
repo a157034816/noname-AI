@@ -147,9 +147,20 @@ function pettyBias(player, target, get) {
  * @param {*} game
  * @param {*} _status
  * @param {"chooseCard"|"chooseTarget"|"chooseButton"|string} kind
+ * @param {{decisionStats?: any, session?: any}=} track 决策统计追踪上下文（用于覆盖/命中/选用率）
  * @returns {(candidate:any, all:any)=>number}
  */
-function wrapCheck(player, check, get, game, _status, kind) {
+function wrapCheck(player, check, get, game, _status, kind, track) {
+	/** @type {any} */
+	const decisionStats = track && track.decisionStats ? track.decisionStats : null;
+	/** @type {any} */
+	const session = track && track.session ? track.session : null;
+
+	/** @type {any} */
+	let lastAllRef = null;
+	/** @type {any} */
+	let currentStep = null;
+
 	return function (candidate, all) {
 		let base = 0;
 		try {
@@ -181,6 +192,21 @@ function wrapCheck(player, check, get, game, _status, kind) {
 			get,
 			stop: false,
 		};
+
+		// AI 决策统计：每次“候选集 all”变更视为进入一个新决策步（直到 finalizeSelection 标记结束）。
+		try {
+			if (decisionStats && session && all && Array.isArray(all)) {
+				if (all !== lastAllRef) {
+					lastAllRef = all;
+					currentStep = decisionStats.beginStep ? decisionStats.beginStep(session, all) : null;
+				}
+			}
+		} catch (e) {}
+		// 通过 ctx 透传当前决策步，供 hook_bus 内对每个 handler 统计 delta。
+		try {
+			if (currentStep) ctx.__slqjAiDecisionStep = currentStep;
+		} catch (e) {}
+
 		if (hooks) ctx = hooks.emit("slqj_ai_score", ctx) || ctx;
 
 		let extra = 0;
@@ -195,9 +221,15 @@ function wrapCheck(player, check, get, game, _status, kind) {
 		ctx.extra = extra;
 		ctx.score = (typeof ctx.score === "number" ? ctx.score : base) + extra;
 		ctx.stage = "builtin";
+		try {
+			if (currentStep) ctx.__slqjAiDecisionStep = currentStep;
+		} catch (e) {}
 		if (hooks) ctx = hooks.emit("slqj_ai_score", ctx) || ctx;
 
 		ctx.stage = "final";
+		try {
+			if (currentStep) ctx.__slqjAiDecisionStep = currentStep;
+		} catch (e) {}
 		if (hooks) ctx = hooks.emit("slqj_ai_score", ctx) || ctx;
 
 		if (ctx && typeof ctx.score === "number" && !Number.isNaN(ctx.score)) return ctx.score;
@@ -228,7 +260,16 @@ export function installSelectorPatch({ ai, get, game, _status }) {
 			if (!isLocalAIPlayer(player, game, _status) || !getPersona(player)) {
 				return original.chooseCard(check);
 			}
-			return original.chooseCard(wrapCheck(player, check, get, game, _status, "chooseCard"));
+			const hooksAny = game?.__slqjAiPersona?.hooks || game?.slqjAiHooks;
+			const decisionStats = hooksAny && typeof hooksAny === "object" ? hooksAny.__slqjAiDecisionStats : null;
+			const session = decisionStats && typeof decisionStats.beginSession === "function" ? decisionStats.beginSession({ kind: "chooseCard" }) : null;
+			try {
+				return original.chooseCard(wrapCheck(player, check, get, game, _status, "chooseCard", { decisionStats, session }));
+			} finally {
+				try {
+					if (session && decisionStats && typeof decisionStats.endSession === "function") decisionStats.endSession(session);
+				} catch (e) {}
+			}
 		};
 	}
 
@@ -238,7 +279,16 @@ export function installSelectorPatch({ ai, get, game, _status }) {
 			if (!isLocalAIPlayer(player, game, _status) || !getPersona(player)) {
 				return original.chooseTarget(check);
 			}
-			return original.chooseTarget(wrapCheck(player, check, get, game, _status, "chooseTarget"));
+			const hooksAny = game?.__slqjAiPersona?.hooks || game?.slqjAiHooks;
+			const decisionStats = hooksAny && typeof hooksAny === "object" ? hooksAny.__slqjAiDecisionStats : null;
+			const session = decisionStats && typeof decisionStats.beginSession === "function" ? decisionStats.beginSession({ kind: "chooseTarget" }) : null;
+			try {
+				return original.chooseTarget(wrapCheck(player, check, get, game, _status, "chooseTarget", { decisionStats, session }));
+			} finally {
+				try {
+					if (session && decisionStats && typeof decisionStats.endSession === "function") decisionStats.endSession(session);
+				} catch (e) {}
+			}
 		};
 	}
 
@@ -248,7 +298,16 @@ export function installSelectorPatch({ ai, get, game, _status }) {
 			if (!isLocalAIPlayer(player, game, _status) || !getPersona(player)) {
 				return original.chooseButton(check);
 			}
-			return original.chooseButton(wrapCheck(player, check, get, game, _status, "chooseButton"));
+			const hooksAny = game?.__slqjAiPersona?.hooks || game?.slqjAiHooks;
+			const decisionStats = hooksAny && typeof hooksAny === "object" ? hooksAny.__slqjAiDecisionStats : null;
+			const session = decisionStats && typeof decisionStats.beginSession === "function" ? decisionStats.beginSession({ kind: "chooseButton" }) : null;
+			try {
+				return original.chooseButton(wrapCheck(player, check, get, game, _status, "chooseButton", { decisionStats, session }));
+			} finally {
+				try {
+					if (session && decisionStats && typeof decisionStats.endSession === "function") decisionStats.endSession(session);
+				} catch (e) {}
+			}
 		};
 	}
 }

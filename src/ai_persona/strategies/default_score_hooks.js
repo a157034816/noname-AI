@@ -93,7 +93,7 @@ function safeGetTurnMemory(player) {
  *
  * 说明：
  * - 仅在 player 为本回合 activePid 时统计（避免回合外/响应阶段把历史伤害算进来）
- * - 口径用于限制开局“同回合盲打连击收割”的过激倾向
+ * - 规则用于限制开局“同回合盲打连击收割”的过激倾向
  *
  * @param {*} player
  * @param {*} target
@@ -189,9 +189,76 @@ function safeGetWeaponCard(player, get) {
 }
 
 /**
+ * 识别目标是否装备了“仁王盾/仁王金刚盾”（装备名：renwang / rewrite_renwang）。
+ *
+ * @param {*} target
+ * @param {*} get
+ * @returns {("renwang"|"rewrite_renwang")|null}
+ */
+function getRenwangShieldType(target, get) {
+	if (!target) return null;
+	try {
+		if (typeof target?.hasSkillTag === "function" && target.hasSkillTag("unequip2")) return null;
+	} catch (e) {
+		// ignore
+	}
+
+	const equips = safeGetCards(target, "e");
+	for (const c of equips) {
+		const name = String(c?.name || "");
+		if (name === "renwang" || name === "rewrite_renwang") return /** @type {any} */ (name);
+	}
+	return null;
+}
+
+/**
+ * 判断【杀】在“仁王盾/仁王金刚盾”存在时是否大概率无效（仅按颜色/花色做轻量判断）。
+ *
+ * 规则：
+ * - renwang：黑色【杀】无效
+ * - rewrite_renwang：黑色【杀】与红桃【杀】无效（等价于非方块【杀】无效）
+ *
+ * @param {*} shaCard
+ * @param {("renwang"|"rewrite_renwang")|null} shieldType
+ * @param {*} get
+ * @returns {boolean}
+ */
+function isShaIneffectiveAgainstRenwang(shaCard, shieldType, get) {
+	if (!shaCard || String(shaCard?.name || shaCard?.viewAs || "") !== "sha") return false;
+	if (!shieldType) return false;
+
+	const color = safeGetColor(shaCard, get);
+	if (shieldType === "renwang") return color === "black";
+
+	// rewrite_renwang：黑色/红桃杀无效（只有方块杀稳定有效）
+	const suit = safeGetSuit(shaCard, get);
+	return color === "black" || suit === "heart";
+}
+
+/**
+ * 判断【杀】是否存在“无视防具”的例外（用于避免误判仁王盾/仁王金刚盾的无效杀）。
+ *
+ * 说明：
+ * - 引擎层面对防具无视主要通过 source.hasSkillTag("unequip", false, {name,target,card}) 判定
+ * - 同时兼容 unequip_ai（部分扩展/AI 口径会用该 tag 反映“视为无视防具”）
+ *
+ * @param {*} source
+ * @param {*} target
+ * @param {*} shaCard
+ * @returns {boolean}
+ */
+function isRenwangShieldBypassedBySource(source, target, shaCard) {
+	if (!source || !target || !shaCard) return false;
+	const name = String(shaCard?.name || shaCard?.viewAs || "");
+	/** @type {any} */
+	const arg = { name: name || null, target: target, card: shaCard };
+	return safeHasSkillTag(source, "unequip", false, arg) || safeHasSkillTag(source, "unequip_ai", false, arg);
+}
+
+/**
  * 估算玩家“失去武器后会被卡距离”的风险（轻量启发式）。
  *
- * 口径（按“卡距离=范围内没有可攻击目标”）：
+ * 规则（按“卡距离=范围内没有可攻击目标”）：
  * - 若玩家失去武器后，其估算攻击范围内没有任何“明确敌对目标”（attitude<-0.3），则判定为有风险。
  * - 该判定是距离层面的轻量启发式，不精确模拟所有技能/装备带来的额外选目标限制。
  *
@@ -427,6 +494,26 @@ function safeGetColor(card, get) {
 }
 
 /**
+ * 安全读取卡牌花色（缺失时回退空字符串）。
+ *
+ * @param {*} card
+ * @param {*} get
+ * @returns {string}
+ */
+function safeGetSuit(card, get) {
+	if (!card) return "";
+	if (typeof get?.suit === "function") {
+		try {
+			const v = get.suit(card);
+			return typeof v === "string" ? v : "";
+		} catch (e) {
+			// ignore
+		}
+	}
+	return typeof card.suit === "string" ? card.suit : "";
+}
+
+/**
  * 安全读取卡牌 nature 列表（缺失时回退空数组）。
  *
  * @param {*} card
@@ -452,7 +539,7 @@ function safeGetNatureList(card, get) {
 /**
  * 获取【杀】的“保留层级”（越稀有越应保留）。
  *
- * 口径：火杀 > 雷杀 > 红杀 > 黑杀。
+ * 规则：火杀 > 雷杀 > 红杀 > 黑杀。
  *
  * @param {*} card
  * @param {*} get
@@ -591,20 +678,6 @@ function getJiuSearchShaHabit(player) {
 }
 
 /**
- * 读取“观察者”对某目标的【杀】密度推断（缺失时回退 0）。
- *
- * @param {*} observer
- * @param {*} target
- * @returns {number}
- */
-function safeGetObservedShaTempo(observer, target) {
-	if (!observer || !target) return 0;
-	const rec = observer?.storage?.[STORAGE_KEY]?.memory?.basicTempo?.[getPid(target)];
-	const v = rec?.sha;
-	return typeof v === "number" && !Number.isNaN(v) ? v : 0;
-}
-
-/**
  * 安全读取技能 info（缺失时回退 null）。
  *
  * @param {string} skill
@@ -731,7 +804,7 @@ function isDamageLikeChooseTargetEvent(event, get) {
  * - 在进攻决策（chooseTarget）阶段避免无意义地“喂卖血”
  * - 不精确模拟技能结算，仅区分“过牌/回血/拿牌/反制伤害/控制/救援”等收益
  *
- * 口径：
+ * 规则：
  * - 仅统计同时带有卖血标记的技能，避免把目标其他无关收益技能算入
  * - 若无法识别具体收益但目标确有卖血标签，则返回保守默认值（被动≈2.0，主动≈1.0）
  *
@@ -1141,10 +1214,10 @@ function estimateActiveMaixieCardEconomy(skill, info, player, event, get) {
 	if (Number.isFinite(best) && best > 0) {
 		cardGain = best;
 	} else if (ai[TAG_DRAW_SELF]) {
-		// 保守默认：主动卖血摸牌的典型口径（苦肉）为 1 血换 2 牌
+		// 保守默认：主动卖血摸牌的典型规则（苦肉）为 1 血换 2 牌
 		cardGain = 2;
 	} else if (ai[TAG_GAIN_OTHER_CARDS]) {
-		// 获得牌的口径差异较大，这里不强行拉高，避免误把“1 血换 1 牌”当作梭哈条件
+		// 获得牌的规则差异较大，这里不强行拉高，避免误把“1 血换 1 牌”当作梭哈条件
 		cardGain = 1;
 	}
 
@@ -1260,7 +1333,7 @@ function getActiveMaixieZhugeAllInContext(player, skill, info, event, game, get)
 /**
  * 判断是否存在“杀盟友开路 -> 杀下家敌人”的爆发线（非常激进）。
  *
- * 口径（轻量启发式）：
+ * 规则（轻量启发式）：
  * - 你的下家为“盟友”（att>0.6），其下家为“敌人”（att<-0.6）
  * - 你当前无法对该敌人出【杀】（大概率因距离），且预计“打掉盟友后距离降低 1”即可出杀
  * - 你具备多次出【杀】能力（诸葛连弩/无限杀/额外杀），且手里【杀】数量足够覆盖“击杀盟友 + 击杀敌人”
@@ -1290,6 +1363,12 @@ function getFriendlyFireOpenPathContext(player, shaCard, game, get) {
 	if (get?.mode?.() === "identity") {
 		const zhu = game?.zhu;
 		if (zhu && ally === zhu) return empty;
+
+		// 身份局：主公绝不为“开路”去杀忠臣/明忠（主公击杀忠臣惩罚极大）。
+		const selfId = String(player?.identity || "");
+		const allyId = String(ally?.identity || "");
+		const isLord = (zhu && player === zhu) || selfId === "zhu" || player?.isZhu === true;
+		if (isLord && (allyId === "zhong" || allyId === "mingzhong")) return empty;
 	}
 
 	const enemy = getNextAlivePlayer(ally, game);
@@ -1584,7 +1663,7 @@ function getTargetUseValueFromEvent(player, target, event, get) {
 /**
  * 判断技能是否更像“过牌/确立资源”的主动技能。
  *
- * 口径（启发式，容忍少量误判）：
+ * 规则（启发式，容忍少量误判）：
  * - 首选：技能定义了 `ai.tag.draw|gain`
  * - 兜底：从 prompt 文案提取“摸牌/获得牌/观看牌堆顶/重铸”等信号
  * - 再兜底：若技能为“无目标主动技”且 `ai.result.player` 明显为正，也视为过牌类候选
@@ -1720,7 +1799,7 @@ function hasNotActedYetThisRound(actor, target) {
  *
  * 说明：
  * - 该判定用于约束主公首轮在信息不足时的“盲目乱打”。
- * - “暴露”口径：`identityShown===true` 或 `ai.shown>0`（软暴露）。
+ * - “暴露”规则：`identityShown===true` 或 `ai.shown>0`（软暴露）。
  *
  * @param {*} player
  * @param {*} game
@@ -2039,7 +2118,7 @@ function getEquipKind(card, get) {
 /**
  * 判断“当前是否存在明确的进攻需求”（轻量近似）。
  *
- * 口径：若手牌里存在【杀】或【顺手牵羊】，且当前能对任一明显敌对目标实际使用，则认为“有进攻需求”。\n
+ * 规则：若手牌里存在【杀】或【顺手牵羊】，且当前能对任一明显敌对目标实际使用，则认为“有进攻需求”。\n
  * @param {*} player
  * @param {*} game
  * @param {*} get
@@ -2154,7 +2233,7 @@ function getPlayerPower(player) {
 
 	const { keepable, overflow } = getHandStorageInfo(player);
 
-	// 通用技巧：能存住牌强过只有血量健康
+	// 通用策略：能存住牌强过只有血量健康
 	// - hp 仍是核心生存资源，但“可留住的手牌”更能代表回合外韧性与后续展开能力
 	// - 溢出牌（超过上限的部分）更不稳定：可能会被迫弃置/被拆顺，因此权重更低
 	const hpScore = hp + (maxHp - hp) * 0.15;
@@ -2168,7 +2247,7 @@ function getPlayerPower(player) {
 /**
  * 计算“局势指数”（顺风>0，逆风<0），用于把「顺风求稳，逆风求变」落到评分调节上。
  *
- * 口径（跨模式通用）：
+ * 规则（跨模式通用）：
  * 1) 若可从态度推断阵营关系（存在明显的友/敌），则用“我方(含自己) vs 敌方(含中立折算)”的强弱差；
  * 2) 否则回退为“自己 vs 其他人平均强度”的差。
  *
@@ -2288,7 +2367,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				const penalty = (0.65 + 0.85 * dScale) * idScale;
 				ctx.score -= penalty;
 			},
-			{ priority: 6 }
+			{ priority: 6, title: "身份局：开局远位盲狙克制" }
 		);
 	}
 
@@ -2355,7 +2434,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				}
 			},
 			// 放到更靠后：尽量不破坏既有策略，仅在“首轮盲打过激”时压一压
-			{ priority: 1 }
+			{ priority: 1, title: "身份局：首轮盲打过杀克制" }
 		);
 	}
 
@@ -2409,7 +2488,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				const penalty = 4.2 + 0.35 * clampNumber(base, 0, 6);
 				ctx.score -= penalty;
 			},
-			{ priority: 3 }
+			{ priority: 3, title: "身份局：优先处理明置敌人" }
 		);
 	}
 
@@ -2430,7 +2509,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				const zhu = game?.zhu;
 				if (!zhu) return;
 
-				// 首轮：roundNumber 口径与其他开局策略保持一致（round<=2 的策略同源）
+				// 首轮：roundNumber 规则与其他开局策略保持一致（round<=2 的策略同源）
 				const round = typeof game?.roundNumber === "number" && !Number.isNaN(game.roundNumber) ? game.roundNumber : 0;
 				if (!(round > 0 && round <= 1)) return;
 
@@ -2453,7 +2532,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				if (base < 6) ctx.score -= 1.8;
 			},
 			// priority 越小越晚执行：尽量在既有策略之后再做“首轮强目标”影响
-			{ priority: 2 }
+			{ priority: 2, title: "身份局：反贼首轮优先打主公" }
 		);
 	}
 
@@ -2488,7 +2567,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 
 				ctx.score -= 9999;
 			},
-			{ priority: 2 }
+			{ priority: 2, title: "身份局：内奸首轮避免主动害主公" }
 		);
 	}
 
@@ -2525,11 +2604,11 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 
 				ctx.score -= 9999;
 			},
-			{ priority: 2 }
+			{ priority: 2, title: "身份局：主公首轮全暗不盲打" }
 		);
 	}
 
-	// 扩展技巧：手牌未到上限且无进攻需求时，武器/减马尽量暗藏手里（避免“无收益明牌”与被借刀等风险）
+	// 扩展策略：手牌未到上限且无进攻需求时，武器/减马尽量暗藏手里（避免“无收益明牌”与被借刀等风险）
 	if (!game.__slqjAiPersona._equipHoldInHandHookInstalled) {
 		game.__slqjAiPersona._equipHoldInHandHookInstalled = true;
 		hooks.on(
@@ -2559,11 +2638,11 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				const penalty = (ek.kind === "weapon" ? 0.9 : 0.75) * (0.55 + t * 0.75);
 				ctx.score -= penalty;
 			},
-			{ priority: 5 }
+			{ priority: 5, title: "扩展策略：装备暗藏（武器/减马）" }
 		);
 	}
 
-	// 通用技巧：无懈可击大部分情况下比桃更关键 —— 弃牌/被迫失去手牌时优先保留无懈
+	// 通用策略：无懈可击大部分情况下比桃更关键 —— 弃牌/被迫失去手牌时优先保留无懈
 	if (!game.__slqjAiPersona._wuxieKeepPriorityHookInstalled) {
 		game.__slqjAiPersona._wuxieKeepPriorityHookInstalled = true;
 		hooks.on(
@@ -2589,11 +2668,11 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 					else ctx.score += 0.9;
 				}
 			},
-			{ priority: 5 }
+			{ priority: 5, title: "通用策略：弃牌优先保留无懈" }
 		);
 	}
 
-	// 通用技巧：基本牌通用技巧（回合外多留基本牌；杀/闪/酒保留偏好；温和“卖血保杀”；酒的“先喝酒再找牌”习惯）
+	// 通用策略：基本牌通用策略（回合外多留基本牌；杀/闪/酒保留偏好；温和“卖血保杀”；酒的“先喝酒再找牌”习惯）
 	if (!game.__slqjAiPersona._basicCardGeneralTipsHookInstalled) {
 		game.__slqjAiPersona._basicCardGeneralTipsHookInstalled = true;
 		hooks.on(
@@ -2626,21 +2705,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 					// 闪：被集火风险高时更要保留最后一闪；嘲讽低且闪多时允许丢“多余的闪”
 					if (name === "shan") {
 						if (shanCount <= 1) {
-							// 若已观测到“敌方杀密度更高”，进一步强化“留最后一闪”的倾向
-							let maxEnemyShaTempo = 0;
-							for (const p of game.players || []) {
-								if (!p || p === player) continue;
-								try {
-									if (typeof p.isDead === "function" && p.isDead()) continue;
-								} catch (e) {
-									// ignore
-								}
-								if (safeAttitude(get, player, p) >= -0.6) continue;
-								const t = safeGetObservedShaTempo(player, p);
-								if (t > maxEnemyShaTempo) maxEnemyShaTempo = t;
-							}
-							const tempoPenalty = clampNumber(maxEnemyShaTempo, 0, 2) * 0.35;
-							ctx.score -= 2.0 + 0.9 * threatFactor + tempoPenalty;
+							ctx.score -= 2.0 + 0.9 * threatFactor;
 							return;
 						}
 						if (shanCount >= 2) {
@@ -2690,6 +2755,16 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 						if (!forcedTarget) return;
 						if (typeof get?.itemtype === "function" && get.itemtype(forcedTarget) !== "player") return;
 
+						// 仁王盾/仁王金刚盾：对无效【杀】直接禁用（避免“明知无效还浪费杀”）
+						// - 例外：若本次【杀】存在“无视防具”的情况，则不禁用
+						const shieldType0 = getRenwangShieldType(forcedTarget, get);
+						if (shieldType0 && isShaIneffectiveAgainstRenwang(card, shieldType0, get)) {
+							if (!isRenwangShieldBypassedBySource(player, forcedTarget, card)) {
+								ctx.score -= 9999;
+								return;
+							}
+						}
+
 						const attToVictim = safeAttitude(get, player, forcedTarget);
 						if (attToVictim > 0.3) {
 							// 不对友方出杀：宁可交武器也不误伤
@@ -2730,6 +2805,16 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 									if (vToSource >= 5) donateBenefit += 0.7;
 									const delta = vToSource - vToMe;
 									if (delta > 0.5) donateBenefit += clampNumber(delta, 0, 4) * 0.18;
+
+									// 若这张【杀】对“仁王盾/仁王金刚盾”目标无效，则更倾向不出杀直接交武器（避免浪费无效杀）。
+									const shieldType = getRenwangShieldType(forcedTarget, get);
+									if (
+										shieldType &&
+										isShaIneffectiveAgainstRenwang(card, shieldType, get) &&
+										!isRenwangShieldBypassedBySource(player, forcedTarget, card)
+									) {
+										donateBenefit += 0.75;
+									}
 
 									if (donateBenefit >= 1.1) {
 										ctx.score -= 2.4;
@@ -2834,53 +2919,11 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 					ctx.score += 0.55 * earlyFactor;
 				}
 			},
-			{ priority: 5 }
+			{ priority: 5, title: "通用策略：基本牌保留偏好" }
 		);
 	}
 
-	// 推断落地：对手【杀】密度倾向（出牌快→更可能杀多）
-	// - 控场/拆迁类：轻度偏向先处理“杀密度更高”的敌方目标（不推翻基础收益）
-	if (!game.__slqjAiPersona._shaTempoInferenceHookInstalled) {
-		game.__slqjAiPersona._shaTempoInferenceHookInstalled = true;
-		hooks.on(
-			"slqj_ai_score",
-			ctx => {
-				if (!ctx || ctx.kind !== "chooseTarget" || ctx.stage !== "final") return;
-				if (typeof get?.itemtype === "function" && get.itemtype(ctx.candidate) !== "player") return;
-				const player = ctx.player;
-				const target = ctx.candidate;
-				if (!player || !target) return;
-
-				const card = findEventCard(ctx.event);
-				const cardName = String(card?.name || "");
-				if (!cardName) return;
-				if (cardName !== "lebu" && cardName !== "bingliang" && cardName !== "guohe" && cardName !== "shunshou") return;
-
-				// 仅对“有害目标选择”生效（避免干扰少数对友方的正收益拆顺等）
-				const tv = getResultNumberForTarget(card, ctx.event?.skill, player, target, get);
-				if (tv >= 0) return;
-
-				const att = safeAttitude(get, player, target);
-				if (att >= -0.6) return;
-
-				const tempo = safeGetObservedShaTempo(player, target);
-				if (tempo <= 0.6) return;
-
-				const base = typeof ctx.base === "number" && !Number.isNaN(ctx.base) ? ctx.base : 0;
-				if (base <= 0) return;
-				// 高收益目标不做额外推断影响，避免推翻明显最优解
-				if (base >= 4.5) return;
-
-				const k = cardName === "lebu" ? 0.28 : cardName === "bingliang" ? 0.22 : 0.18;
-				const bonus = k * clampNumber(tempo, 0, 2);
-				const scale = clampNumber(1 - base / 4.5, 0.35, 1);
-				ctx.score += bonus * scale;
-			},
-			{ priority: 4 }
-		);
-	}
-
-	// 通用技巧：能存住牌强过只有血量健康 —— 选目标时适度把“可留住的手牌”视为更高权重资源
+	// 通用策略：能存住牌强过只有血量健康 —— 选目标时适度把“可留住的手牌”视为更高权重资源
 	if (!game.__slqjAiPersona._handStoragePriorityHookInstalled) {
 		game.__slqjAiPersona._handStoragePriorityHookInstalled = true;
 		hooks.on(
@@ -2921,7 +2964,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 					ctx.score += clampNumber(overflow * 0.35, 0, 0.9);
 				}
 			},
-			{ priority: 4 }
+			{ priority: 4, title: "通用策略：存牌能力权重" }
 		);
 	}
 
@@ -2967,7 +3010,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				const bonus = scale * (wT * 1.6 * t + wG * 0.5 * g);
 				ctx.score += bonus;
 			},
-			{ priority: 3 }
+			{ priority: 3, title: "情绪：怒气偏好（选目标）" }
 		);
 
 		// 2) 选牌：怒气高时更偏向进攻/压制类牌
@@ -3009,11 +3052,11 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				const scale = clampNumber(1 - base / 6, 0.2, 1);
 				ctx.score += scale * wG * 0.9 * g;
 			},
-			{ priority: 3 }
+			{ priority: 3, title: "情绪：怒气偏好（选牌）" }
 		);
 	}
 
-	// 通用技巧：马上能用出来的牌更有价值
+	// 通用策略：马上能用出来的牌更有价值
 	// - 拆/顺/攻击：优先干扰“本轮还没行动”的目标（更可能好牌多、还没展开）
 	// - 补牌：优先给“马上行动”的友方（更可能把资源转化为即时收益）
 	if (!game.__slqjAiPersona._immediateUseValueHookInstalled) {
@@ -3073,11 +3116,11 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 					ctx.score += bonus;
 				}
 			},
-			{ priority: 4 }
+			{ priority: 4, title: "通用策略：即时收益优先" }
 		);
 	}
 
-	// 通用技巧：先过牌，再想怎么行动 —— 出牌阶段优先“过牌（draw）”以确立资源，再做最大化决策
+	// 通用策略：先过牌，再想怎么行动 —— 出牌阶段优先“过牌（draw）”以确立资源，再做最大化决策
 	if (!game.__slqjAiPersona._drawFirstThenActHookInstalled) {
 		game.__slqjAiPersona._drawFirstThenActHookInstalled = true;
 		hooks.on(
@@ -3148,7 +3191,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				const t = clampNumber(1 - clampNumber(base / 3.2, 0, 1), 0, 1);
 				ctx.score -= (0.18 + 0.38 * t) * startedScale;
 			},
-			{ priority: 4 }
+			{ priority: 4, title: "通用策略：先过牌再行动" }
 		);
 	}
 
@@ -3200,7 +3243,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 
 				ctx.score -= 2.4;
 			},
-			{ priority: 5 }
+			{ priority: 5, title: "行为规则：连弩起爆前延后出杀" }
 		);
 	}
 
@@ -3265,7 +3308,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 
 				ctx.score += bonus;
 			},
-			{ priority: 6 }
+			{ priority: 6, title: "行为规则：连弩起爆梭哈卖血" }
 		);
 	}
 
@@ -3316,7 +3359,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 
 				ctx.score -= 9999;
 			},
-			{ priority: 7 }
+			{ priority: 7, title: "行为规则：低血线禁用主动卖血" }
 		);
 	}
 
@@ -3359,7 +3402,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				if (c.zhugeEquipped) bonus += 0.35;
 				ctx.score += bonus;
 			},
-			{ priority: 8 }
+			{ priority: 8, title: "极激进：开路斩友（出杀倾向）" }
 		);
 
 		// 2) 选目标：对“开路盟友”加分，使其在【杀】的选目标中可被选中。
@@ -3400,11 +3443,11 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				if (c.zhugeEquipped) bonus += 1.2;
 				ctx.score += bonus;
 			},
-			{ priority: 8 }
+			{ priority: 8, title: "极激进：开路斩友（选目标=盟友）" }
 		);
 	}
 
-	// 通用技巧：锦囊牌通用技巧 —— 越关键的锦囊越后用（保守实现：仅做顺序偏好，不强制改动最优解）
+	// 通用策略：锦囊牌通用策略 —— 越关键的锦囊越后用（保守实现：仅做顺序偏好，不强制改动最优解）
 	// - 延时锦囊最后贴：出牌阶段前段，若仍存在其他可用动作，则对延时锦囊轻度降权
 	// - 拆顺优先于伤害动作：同回合存在拆顺与伤害动作时，轻度偏向先拆顺
 	if (!game.__slqjAiPersona._trickGeneralOrderHookInstalled) {
@@ -3454,7 +3497,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 					return;
 				}
 
-				// 2) 拆顺/伤害顺序取舍（来自通用技巧，保守实现）：
+				// 2) 拆顺/伤害顺序取舍（来自通用策略，保守实现）：
 				// - 若同回合同时存在【杀】与【拆/顺】，前段略偏向“先杀再拆顺”（打不死时更容易拿到好牌）
 				// - 否则：若同回合存在【拆/顺】与其他伤害动作，则仍保留“先拆顺再伤害”的轻量偏好
 				if (base >= 3.2) return;
@@ -3500,11 +3543,11 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 					ctx.score -= 0.18 * earlyFactor;
 				}
 			},
-			{ priority: 4 }
+			{ priority: 4, title: "锦囊牌通用策略优化（出牌顺序）" }
 		);
 	}
 
-	// 通用技巧：锦囊牌通用技巧（子章节）—— AOE/五谷/桃园/火攻/决斗/乐/兵/闪电/借刀等
+	// 通用策略：锦囊牌通用策略（子章节）—— AOE/五谷/桃园/火攻/决斗/乐/兵/闪电/借刀等
 	// 说明：均为“保守偏好”，只在收益接近或局势/阶段明显时轻推，不推翻强收益候选。
 	if (!game.__slqjAiPersona._trickSubsectionsHookInstalled) {
 		game.__slqjAiPersona._trickSubsectionsHookInstalled = true;
@@ -3683,7 +3726,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 						const preTarget = selected.length ? selected[selected.length - 1] : null;
 						const isAddedTargetPick = !!preTarget;
 
-						// 友敌阈值：参考身份局证据系统的口径（±0.3 比 ±0.6 更稳健）
+						// 友敌阈值：参考身份局证据系统的规则（±0.3 比 ±0.6 更稳健）
 						const att = safeAttitude(get, player, target);
 						const friendlyLike = att > 0.3;
 						const enemyLike = att < -0.3;
@@ -3706,6 +3749,13 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 								}
 							}
 
+							// 2.5) 借友军刀拿武器：addedTarget 优先选“带仁王盾”的敌人（提高“不出杀→交武器”的稳定性）
+							if (preToMe > 0.3 && enemyLike) {
+								const shieldType = getRenwangShieldType(target, get);
+								if (shieldType === "rewrite_renwang") ctx.score += 0.95;
+								else if (shieldType === "renwang") ctx.score += 0.75;
+							}
+
 							// 3) 轻量偏向明确敌对目标；中立目标更保守（避免“乱借刀乱砍”）
 							if (enemyLike) ctx.score += 0.55;
 							else ctx.score -= 0.2;
@@ -3726,6 +3776,27 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 								}
 							} catch (e) {
 								// ignore
+							}
+
+							// 约束：敌方若存在可借的武器目标，则不向友军借刀拿武器（避免“有更优解还动队友装备”）
+							let hasEnemyWeapon = false;
+							for (const p of game.players || []) {
+								if (!p || p === player) continue;
+								try {
+									if (typeof p.isDead === "function" && p.isDead()) continue;
+								} catch (e) {
+									// ignore
+								}
+								const att2 = safeAttitude(get, player, p);
+								if (att2 >= -0.3) continue;
+								if (safeGetWeaponCard(p, get)) {
+									hasEnemyWeapon = true;
+									break;
+								}
+							}
+							if (hasEnemyWeapon) {
+								ctx.score -= 9999;
+								return;
 							}
 
 							// 允许“借友军的刀”，但前提：
@@ -3821,11 +3892,11 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 					}
 				}
 			},
-			{ priority: 4 }
+			{ priority: 4, title: "锦囊牌通用策略优化（细分偏好）" }
 		);
 	}
 
-	// 通用技巧：锦囊牌通用技巧（同段落：铁索/拆顺/无中/无懈）
+	// 通用策略：锦囊牌通用策略（同段落：铁索/拆顺/无中/无懈）
 	// 说明：依然以基础收益为主，只在“局势/阶段/目标状态”较明确时做轻量影响。
 	if (!game.__slqjAiPersona._trickSpecificTipsHookInstalled) {
 		game.__slqjAiPersona._trickSpecificTipsHookInstalled = true;
@@ -3951,6 +4022,8 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 								if (overflow <= 0 && hand > 0 && hand <= 2) delta = 0.7;
 								if (overflow >= 1) delta -= 0.8;
 							}
+							const base = typeof ctx.base === "number" && !Number.isNaN(ctx.base) ? ctx.base : 0;
+							if (base <= 0 && delta > 0) delta = 0;
 							ctx.score += delta;
 							return;
 						}
@@ -4132,6 +4205,40 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 					// 装备区：优先拆敌方高价值装备（关键装备）
 					if (pos === "e") {
 						const name = String(link?.name || "");
+
+						// 白银狮子例外：敌方受伤且会因此回复时，若还有其它可选牌则尽量不要拆/顺（避免“帮敌回血”）
+						if (att < 0 && name === "baiyin" && owner) {
+							let damaged = false;
+							try {
+								if (typeof owner?.isDamaged === "function") damaged = !!owner.isDamaged();
+								else {
+									const hp = owner?.hp;
+									const maxHp = owner?.maxHp;
+									if (typeof hp === "number" && typeof maxHp === "number" && hp < maxHp) damaged = true;
+								}
+							} catch (e) {
+								damaged = false;
+							}
+							if (damaged) {
+								let canRecover = true;
+								if (typeof get?.recoverEffect === "function") {
+									try {
+										canRecover = get.recoverEffect(owner, player, player) > 0;
+									} catch (e) {
+										canRecover = true;
+									}
+								}
+								if (canRecover) {
+									const all = Array.isArray(ctx.all) ? ctx.all : [];
+									const hasOther = all.some(btn => btn && btn.link && btn.link !== link);
+									if (hasOther) {
+										ctx.score = Math.min(ctx.score, -0.15);
+										return;
+									}
+								}
+							}
+						}
+
 						if (att < -0.6 && name === "zhuge") ctx.score += 0.45;
 						if (owner && typeof get?.value === "function") {
 							try {
@@ -4154,7 +4261,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 					}
 				}
 			},
-			{ priority: 4 }
+			{ priority: 4, title: "锦囊牌通用策略优化（铁索/拆顺/无中/无懈）" }
 		);
 	}
 
@@ -4309,7 +4416,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 					}
 				}
 			},
-			{ priority: 4 }
+			{ priority: 4, title: "局势节奏：顺风求稳，逆风求变" }
 		);
 	}
 
@@ -4334,7 +4441,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				// 强制不救：不做任何例外（即便主公/高好感）
 				ctx.score -= 9999;
 			},
-			{ priority: 7 }
+			{ priority: 7, title: "行为规则：不救刚被我攻击的目标" }
 		);
 	}
 
@@ -4356,7 +4463,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				if (dying) penalty *= 0.5;
 				ctx.score -= penalty;
 			},
-			{ priority: 5 }
+			{ priority: 5, title: "默认策略：桃优先留给已暴露友方" }
 		);
 	}
 
@@ -4375,7 +4482,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				if (isExposedEnemyTarget(ctx.player, target, game, get)) return;
 				ctx.score -= 8;
 			},
-			{ priority: 5 }
+			{ priority: 5, title: "默认策略：延时锦囊不乱贴未暴露目标" }
 		);
 	}
 
@@ -4409,7 +4516,38 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				if (isExposedFriendlyTarget(ctx.player, target, game, get)) return;
 				ctx.score -= 6;
 			},
-			{ priority: 5 }
+			{ priority: 5, title: "默认策略：锦囊目标安全（敌/友）" }
+		);
+	}
+
+	// 通用策略：避免无效出杀（仁王盾/仁王金刚盾）
+	// - 目标装备盾且本次【杀】按颜色/花色会被抵消时，直接禁用该目标候选
+	// - 例外：若本次【杀】存在“无视防具”的情况，则不禁用
+	if (!game.__slqjAiPersona._shaAvoidIneffectiveRenwangHookInstalled) {
+		game.__slqjAiPersona._shaAvoidIneffectiveRenwangHookInstalled = true;
+		hooks.on(
+			"slqj_ai_score",
+			ctx => {
+				if (!ctx || ctx.kind !== "chooseTarget" || ctx.stage !== "final") return;
+				if (typeof get?.itemtype === "function" && get.itemtype(ctx.candidate) !== "player") return;
+				const source = ctx.player;
+				const target = ctx.candidate;
+				if (!source || !target) return;
+				if (!isUseCardContext(ctx.event)) return;
+
+				const card = findEventCard(ctx.event);
+				if (!card) return;
+				const name = String(card?.name || card?.viewAs || "");
+				if (name !== "sha") return;
+
+				const shieldType = getRenwangShieldType(target, get);
+				if (!shieldType) return;
+				if (!isShaIneffectiveAgainstRenwang(card, shieldType, get)) return;
+				if (isRenwangShieldBypassedBySource(source, target, card)) return;
+
+				ctx.score -= 9999;
+			},
+			{ priority: 0, title: "通用策略：避免无效杀（仁王盾）" }
 		);
 	}
 
@@ -4428,7 +4566,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				if (shouldUseOffensiveGroupTrick(ctx.player, game, get)) return;
 				ctx.score -= 9;
 			},
-			{ priority: 5 }
+			{ priority: 5, title: "默认策略：群体进攻锦囊使用门槛" }
 		);
 	}
 
@@ -4447,7 +4585,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				if (shouldUseBeneficialGroupTrick(ctx.player, game, get, card)) return;
 				ctx.score -= 9;
 			},
-			{ priority: 5 }
+			{ priority: 5, title: "默认策略：群体有益锦囊使用门槛" }
 		);
 	}
 }

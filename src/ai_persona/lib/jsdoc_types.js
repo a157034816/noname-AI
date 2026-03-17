@@ -41,11 +41,6 @@ export {};
  *  habits?: {
  *    jiuSearchSha?: ("heuristic"|"conservative")
  *  },
- *  basicTempo?: Record<string, {
- *    sha: number,
- *    shaSamples: number,
- *    lastRound: number
- *  }>
  * }} SlqjAiMemory
  */
 
@@ -142,6 +137,8 @@ export {};
  *  slqj_ai_persona_enable_camouflage?: boolean,
  *  slqj_ai_scripts_enable?: boolean,
  *  slqj_ai_scripts_registry?: (string|object),
- *  slqj_ai_scripts_debug?: boolean
+ *  slqj_ai_scripts_config?: (string|object),
+ *  slqj_ai_scripts_debug?: boolean,
+ *  slqj_ai_visual_debug_enable?: boolean
  * }} SlqjAiExtensionConfig
  */ 

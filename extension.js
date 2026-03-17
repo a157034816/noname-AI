@@ -2,11 +2,13 @@ import { lib, game, ui, get, ai, _status } from "../../noname.js";
 import { installPersonaSystem } from "./src/ai_persona/index.js";
 import { installEmotionThrowEvent } from "./src/ai_persona/emotion_throw_event.js";
 import { installSkillCustomTags } from "./src/ai_persona/skill_custom_tags/index.js";
+import { installVisualDebug } from "./src/visual_debug/index.js";
 import { loadExtensionScripts } from "./src/scripts_loader.js";
 import { openScriptsPluginManagerModal } from "./src/scripts_manager_modal.js";
+import { installAiDecisionStatsUi } from "./src/decision_stats_ui.js";
 import { maybeAutoCheckForUpdates } from "./src/update/auto_check.js";
 import { openUpdateModal } from "./src/update/update_modal.js";
-import { register, get as getLogger } from "./src/logger/manager.js";
+import logManager from "./src/logger/manager.js";
 import { ConsoleLogger } from "./src/logger/console.js";
 import { SLQJ_AI_EXTENSION_VERSION, SLQJ_AI_EXTENSION_NAME } from "./src/version.js";
 export const type = "extension";
@@ -27,11 +29,16 @@ export const type = "extension";
 export default function(){
 			return {name:"身临其境的AI",editable:true,connect:false,
 		/**
-		 * 场景就绪回调（预留）。
+		 * 场景就绪回调：注入“AI决策”入口与统计回传（暂停快捷菜单）。
 		 * @returns {void}
 		 */
 		arenaReady:function(){
-    
+			try{
+				if(_status&&_status.connectMode) return;
+				installAiDecisionStatsUi({ lib, game, ui, get });
+			}catch(e){
+				logManager.error("decision_stats", "installAiDecisionStatsUi failed", e);
+			}
 },
 		/**
 		 * 扩展内容定义（预留）。
@@ -69,36 +76,45 @@ export default function(){
 			};
 
 			const basePrefix = `[${SLQJ_AI_EXTENSION_NAME}]`;
-			const logger = register("console", ConsoleLogger, { prefix: basePrefix, debug: isDebug });
+			logManager.register("console", ConsoleLogger, { prefix: basePrefix, debug: isDebug });
 
 			try{
 				installPersonaSystem({ lib, game, get, ai, _status, config });
 			}catch(e){
-				logger.error("persona", "installPersonaSystem failed", e);
+				logManager.error("persona", "installPersonaSystem failed", e);
 			}
 
 			/** 核心：技能自定义 tag 补全（基于技能说明正则匹配推导并写入 skill.ai）。 */
 			try{
 				installSkillCustomTags({ lib, game, ui, get, ai, _status, config });
 			}catch(e){
-				logger.error("skill_custom_tags", "installSkillCustomTags failed", e);
+				logManager.error("skill_custom_tags", "installSkillCustomTags failed", e);
 			}
 
 		/** 互动事件：监听 `player.throwEmotion(...)` 并通过 game.slqjAiHooks 分发。 */
 		try{
 			installEmotionThrowEvent({ lib, game, _status });
 		}catch(e){
-			logger.error("emotion_throw", "installEmotionThrowEvent failed", e);
+			logManager.error("emotion_throw", "installEmotionThrowEvent failed", e);
 		}
 
 		/** 扩展脚本插件：加载 `scripts/` 下的一层脚本文件（可通过 game.slqjAiHooks 注册 hook）。 */
 		try{
 			loadExtensionScripts({ baseUrl: import.meta.url, lib, game, ui, get, ai, _status, config }).catch(function(e){
-				logger.error("scripts", "loadExtensionScripts failed", e);
+				logManager.error("scripts", "loadExtensionScripts failed", e);
 			});
 	}catch(e){
-		logger.error("scripts", "loadExtensionScripts failed", e);
+		logManager.error("scripts", "loadExtensionScripts failed", e);
 	}
+
+		/** 视觉调试：根据 AI 打分在 UI 中高亮“最可能的选择”（默认关闭，可热切换）。 */
+		try{
+			if(!(_status && _status.connectMode)){
+				installVisualDebug({ lib, game, ui, get, ai, _status, config });
+			}
+		}catch(e){
+			logManager.error("visual_debug", "installVisualDebug failed", e);
+		}
 
 		/** 启动时自动检查更新（每次启动最多一次）；发现新版本自动弹窗提示，不强制更新。 */
 		try{
@@ -108,16 +124,16 @@ export default function(){
 					if(game&&game.__slqjAiUpdateModalOpened) return;
 					if(game) game.__slqjAiUpdateModalOpened=true;
 					openUpdateModal({ baseUrl: import.meta.url, lib, game, ui, config: lib.config, currentVersion: SLQJ_AI_EXTENSION_VERSION, initialCheck: result }).catch(function(e){
-						logger.error("update", "openUpdateModal failed", e);
+						logManager.error("update", "openUpdateModal failed", e);
 					});
 				}catch(e){
-					logger.error("update", "maybeAutoCheckForUpdates handler failed", e);
+					logManager.error("update", "maybeAutoCheckForUpdates handler failed", e);
 				}
 			}).catch(function(e){
-				logger.error("update", "maybeAutoCheckForUpdates failed", e);
+				logManager.error("update", "maybeAutoCheckForUpdates failed", e);
 			});
 		}catch(e){
-			logger.error("update", "maybeAutoCheckForUpdates failed", e);
+			logManager.error("update", "maybeAutoCheckForUpdates failed", e);
 		}
 },config:{
 	slqj_ai_inspect_lang:{
@@ -145,6 +161,19 @@ export default function(){
 		onclick:function(bool){
 			game.saveConfig('extension_身临其境的AI_slqj_ai_inspect_enable',bool);
 			game.saveConfig('slqj_ai_inspect_enable',bool);
+		},
+	},
+	slqj_ai_visual_debug_enable:{
+		name:'身临其境：视觉调试(Debug)',
+		intro:'开启后，仅对“你当前操控”的交互选择 UI 显示（自机/单人控制/换人控制均可）：\n1) 出牌阶段高亮AI最可能出的牌，并用指示线指向预测目标；\n2) 弃牌阶段用不同边框高亮区分“建议弃置/建议留下”。\n默认：关闭；支持热切换（推荐重启更稳）',
+		init: lib.config.slqj_ai_visual_debug_enable===undefined?false:lib.config.slqj_ai_visual_debug_enable,
+		/**
+		 * @param {boolean} bool
+		 * @returns {void}
+		 */
+		onclick:function(bool){
+			game.saveConfig('extension_身临其境的AI_slqj_ai_visual_debug_enable',bool);
+			game.saveConfig('slqj_ai_visual_debug_enable',bool);
 		},
 	},
 	slqj_ai_output_core_draw_threshold:{
@@ -297,7 +326,7 @@ export default function(){
 			try{
 				openScriptsPluginManagerModal({ baseUrl: import.meta.url, lib, game, ui, config: lib.config });
 			}catch(e){
-				getLogger("console").error("modal", "openScriptsPluginManagerModal failed", e);
+				logManager.error("modal", "openScriptsPluginManagerModal failed", e);
 			}
 		},
 	},
@@ -324,10 +353,10 @@ export default function(){
 		onclick:function(){
 			try{
 				openUpdateModal({ baseUrl: import.meta.url, lib, game, ui, config: lib.config, currentVersion: SLQJ_AI_EXTENSION_VERSION }).catch(function(e){
-					getLogger("console").error("update", "openUpdateModal failed", e);
+					logManager.error("update", "openUpdateModal failed", e);
 				});
 			}catch(e){
-				getLogger("console").error("update", "openUpdateModal failed", e);
+				logManager.error("update", "openUpdateModal failed", e);
 			}
 		},
 	},
@@ -362,7 +391,7 @@ export default function(){
 			try{
 				window.open(url);
 			}catch(e){
-				getLogger("console").error("ui", "openJoinGroupUrl failed", e);
+				logManager.error("ui", "openJoinGroupUrl failed", e);
 			}
 		},
 	},
@@ -373,6 +402,7 @@ export default function(){
 		'<li>为本地 AI 增加“人格/心智模型”，并提供可视化 AI 面板（需开启“开局添加AI标记(Debug)”后，头像旁出现 <b>AI</b> 标记，点击可查看）。</li>',
 		'<li>身份局提供独立身份猜测（不读取引擎真实身份），并随回合推进衰减线索。</li>',
 		'<li>可选：盲选手牌随机化（反全知）、评分噪声（仅冲动型）。</li>',
+		'<li>可选：<b>视觉调试(Debug)</b>（默认关闭）：出牌阶段高亮 AI 最可能出的牌并指向预测目标；弃牌阶段高亮建议弃置/留下。</li>',
 		'<li>支持 <b>scripts</b> 脚本插件：加载扩展目录 <b>scripts/</b> 下一层脚本，并可在“脚本插件管理”里启用/禁用与调整顺序。</li>',
 		'<li>支持 <b>检查更新/更新</b>：从 GitHub Releases 检查新版本；在支持写文件的环境可一键下载并覆盖更新（需重启生效）。</li>',
 		'</ul>',

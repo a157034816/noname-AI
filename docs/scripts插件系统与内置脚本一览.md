@@ -93,6 +93,8 @@
 - `lib, game, ui, get, ai, _status`
 - `config`：扩展配置对象（可能为 null）
 - `hooks`：HookBus（`game.slqjAiHooks` 或 `game.__slqjAiPersona.hooks`）
+- `scriptFile`：当前脚本文件名（例如 `01_xxx.js`）
+- `scriptConfig`：当前脚本生效配置（已合并默认值+用户覆盖；脚本未导出 Schema 时为空对象）
 
 > 推荐脚本优先使用 `ctx.hooks` 来注入规则，而不是直接 monkey patch 引擎函数。
 
@@ -127,6 +129,47 @@
 
 ---
 
+## 3.1 脚本配置：slqj_ai_scripts_config（参数持久化）
+
+新增：每个脚本可导出配置 Schema：`slqjAiScriptConfig`（v1），并由“脚本插件管理 -> 配置(⚙)”二级弹窗渲染与保存。
+
+Schema 示例：
+
+```js
+export const slqjAiScriptConfig = {
+  version: 1,
+  items: [
+    { key: "chance", name: "概率", type: "number", default: 0.5, min: 0, max: 1, step: 0.05 },
+    { key: "mode", name: "模式", type: "select", default: "A", options: [{ value: "A", label: "A" }, { value: "B", label: "B" }] },
+    { key: "keywords", name: "关键字", type: "textarea", default: "", description: "每行一个关键字" },
+  ],
+};
+```
+
+其中 `type` 支持：`boolean` / `number` / `string` / `textarea` / `select`。
+
+保存键（JSON 字符串）：
+
+- `extension_身临其境的AI_slqj_ai_scripts_config`
+- `slqj_ai_scripts_config`
+
+保存结构（v1）只存“覆盖值”（`default` 不落盘，便于开发者更新默认值后自然生效）：
+
+```js
+{
+  version: 1,
+  overrides: {
+    "01_xxx.js": { chance: 0.8 }
+  }
+}
+```
+
+补充：在“脚本插件管理 -> 配置(⚙)”里，数字项会按 `number` 类型保存；清空数字输入框表示恢复默认值（不会写入 `overrides`）。`textarea` 类型为多行文本输入。
+
+加载器会把“生效配置值”（默认值 + 覆盖值 + 类型/范围兜底）注入到 `ctx.scriptConfig`。
+
+---
+
 ## 4) 管理 UI：脚本插件管理（模态对话框）
 
 入口：`src/scripts_manager_modal.js -> openScriptsPluginManagerModal(opts)`
@@ -136,6 +179,7 @@
 - 单实例：重复打开会先关闭旧实例
 - 显示每个脚本的：
   - 启用开关
+  - 配置(⚙)：打开二级弹窗（配置项由脚本导出）
   - 上移/下移调整顺序
   - 标题/说明（若脚本提供 meta）
 - 工具栏：
@@ -195,6 +239,101 @@ HookBus 支持 `priority`（越大越先执行）：
 
 > 说明：以下脚本位于本扩展根目录 `scripts/`，会被加载器按顺序加载（可在管理 UI 调整）。
 
+### 6.0 内置脚本配置项速查（⚙）
+
+说明：默认值来自各脚本导出的 `slqjAiScriptConfig`；配置保存到 `slqj_ai_scripts_config`（仅保存覆盖值）。
+
+- `00_logger_danmaku_overlay.js`
+  - `rows`: `6`
+- `01_popular_general_candidates.js`
+  - `enableProbability`: `1`
+  - `poolRatio`: `0.5`
+- `02_dianjiangchun_ai_ban_choose_character.js`
+  - `verboseLog`: `false`
+- `03_logger_forward_game_log.js`（默认禁用）
+  - `whitelist`: `"[身临其境的AI]"`
+  - `blacklist`: `"[runForSkillIds]\n[attitude]"`
+- `10_chain_elemental_teamplay.js`（默认关闭）
+  - `useDebugPresetLow`: `false`
+  - `enemyHandMin`: `3`
+  - `allyAttitudeMin`: `3`
+  - `allyHpMin`: `2`
+  - `allyGuessShownMin`: `0.55`
+  - `allyGuessConfidenceMin`: `0.35`
+  - `allyAttitudeMinIfGuessedFriendly`: `-1.2`
+  - `enemyGuessShownMin`: `0.65`
+  - `enemyGuessConfidenceMin`: `0.35`
+  - `enemyAttitudeMaxIfGuessedEnemy`: `1.0`
+  - `ackWindowMs`: `12000`
+  - `cooldownMs`: `15000`
+  - `signalEmotion`: `"flower"`
+  - `autoAckInAIVsAI`: `true`
+  - `autoAckDelayMs`: `300`
+  - `enemyDamageEffectMin`: `0.6`
+  - `allyDamageEffectMin`: `-0.8`
+- `11_compare_pindian_card_choice.js`
+  - `friendAttitudeMin`: `0`
+- `20_peixiu_takeover.js`
+  - `enableGreedyLookahead`: `true`
+  - `greedyLookaheadMode`: `"A"`
+  - `hookPriority`: `1`
+  - `debug`: `false`
+  - `disableBuiltinNoise`: `true`
+  - `enableJuezhiPick`: `true`
+  - `divisorBonus`: `1.0`
+  - `multipleBonus`: `0.45`
+  - `breakPenalty`: `0.6`
+  - `smallMarkMultipleExtra`: `0.35`
+- `21_wu_zhugeliang_takeover.js`
+  - `hookPriority`: `1`
+  - `debug`: `false`
+- `22_xin_jushou_zhuge_bonus.js`
+  - `chance`: `0.75`
+  - `hasCardChanceFactor`: `0.02`
+  - `debug`: `false`
+- `23_xin_jushou_jianying_ai.js`
+  - `hookPriority`: `2`
+  - `debug`: `false`
+  - `matchBonus`: `2.4`
+  - `setupBonus`: `0.8`
+  - `badMetaPenalty`: `0.6`
+- `30_friendly_rage_egg_throw.js`
+  - `stage1Threshold`: `4`
+  - `stage2Threshold`: `7`
+  - `hysteresis`: `0.6`
+  - `burstIntervalMs`: `50`
+  - `stage2ShortMs`: `2000`
+  - `stage2LongMs`: `10000`
+  - `stage2ExtraPerRageMs`: `250`
+  - `stage2ExtraCapMs`: `1500`
+  - `followupDelayTurnsMin`: `1`
+  - `followupDelayTurnsMax`: `4`
+  - `followupBurstMsMin`: `2000`
+  - `followupBurstMsMax`: `4500`
+  - `maxBurstTargets`: `2`
+  - `retaliationEnable`: `true`
+  - `retaliationCooldownMs`: `1400`
+  - `retaliationWindowMs`: `2000`
+  - `retaliationBaseChance`: `0.35`
+  - `retaliationExtraChancePerHit`: `0.18`
+  - `retaliationMaxChance`: `0.95`
+  - `retaliationMaxPerTurnPerTarget`: `2`
+  - `retaliationSuppressMs`: `1200`
+  - `retaliationDelayMsMin`: `120`
+  - `retaliationDelayMsMax`: `360`
+  - `allowDeadThrow`: `true`
+  - `allowDeadTarget`: `true`
+  - `instakillWarEnable`: `true`
+  - `instakillWarChance`: `0.08`
+  - `instakillWarPairMs`: `0`
+  - `instakillWarCooldownMs`: `60`
+  - `instakillWarDelayMsMin`: `80`
+  - `instakillWarDelayMsMax`: `180`
+  - `instakillWarBurstMs`: `6500`
+  - `instakillWarBurstIntervalMs`: `180`
+  - `instakillWarAnnounce`: `true`
+  - `instakillWarOnlyOncePerGame`: `true`
+
 ---
 
 ### 6.1 `01_popular_general_candidates.js`：热门武将候选影响
@@ -202,7 +341,7 @@ HookBus 支持 `priority`（越大越先执行）：
 元信息：
 
 - name：热门武将候选影响
-- version：1.0.3
+- version：1.0.4
 - 作用：影响开局 AI 选将候选列表，让热门/强势武将更容易出现并被选择
 
 接入点：
@@ -218,6 +357,9 @@ HookBus 支持 `priority`（越大越先执行）：
    - `启用概率=1`：进入判定池后再按概率决定是否启用（当前为 100%）
 3) **候选重排/换入**：
    - 将热门 key 尽量换入候选前若干槽位，并整体把热门放前
+4) **禁将/AI禁用过滤**：
+   - 不会把引擎禁将/禁用（`characterDisabled/characterDisabled2`）或点绛唇【AI禁用】武将换入候选
+   - 若候选中已出现禁用项，会优先从候选池重抽替换；无法替换时至少把禁用项沉底
 
 额外补丁（重要）：
 
@@ -231,7 +373,33 @@ HookBus 支持 `priority`（越大越先执行）：
 
 ---
 
-### 6.2 `10_chain_elemental_teamplay.js`：队友配合（铁索传导）
+### 6.2 `02_dianjiangchun_ai_ban_choose_character.js`：点绛唇：AI禁将时机优化
+
+元信息：
+
+- name：点绛唇：AI禁将时机优化
+- version：1.0.1
+- 作用：点绛唇启用后，把 AI 禁将从 gameStart 提前到选将阶段：AI候选中若出现“AI禁用”武将则自动重抽替换，尽量避免“先选将→开局强制换将”的观感与副作用。
+
+接入点：
+
+- 包装 `game.createEvent("chooseCharacter")`：在 chooseCharacter 事件对象上安装一次性的 `ai` 包装器
+- 包装基础 `event.ai(player, list, list2, back)`：对本地 AI 的候选做禁将过滤与重抽替换
+
+关键机制：
+
+1) 读取点绛唇配置 `extension_点绛唇_plans_AI禁用`（空则不生效）
+2) 若候选在 `list` 且存在候选池 `back`：从 `back` 中抽取未禁用武将替换，并把禁将放回 `back`，直到候选不含禁将或无可替换
+3) 若候选位于 `list2`（常见于部分模式的主公候选）：仅对入参做过滤，不改写原数组与全局池子
+4) 临时过滤 `lib.characterReplace`：避免选将阶段的随机替换落到 AI禁用武将
+
+潜在副作用：
+
+- 当可用候选池不足时，可能无法完全替换禁将（会尽量保证传入基础 ai 的候选更安全）
+
+---
+
+### 6.3 `10_chain_elemental_teamplay.js`：队友配合（铁索传导）
 
 元信息：
 
@@ -273,7 +441,7 @@ HookBus 支持 `priority`（越大越先执行）：
 
 ---
 
-### 6.3 `20_peixiu_takeover.js`：裴秀 AI 接管（行图/爵制）
+### 6.4 `20_peixiu_takeover.js`：裴秀 AI 接管（行图/爵制）
 
 元信息：
 
@@ -304,7 +472,7 @@ HookBus 支持 `priority`（越大越先执行）：
 
 ---
 
-### 6.4 `21_wu_zhugeliang_takeover.js`：武诸葛亮 AI 接管（情势/智哲）
+### 6.5 `21_wu_zhugeliang_takeover.js`：武诸葛亮 AI 接管（情势/智哲）
 
 元信息：
 
@@ -328,7 +496,7 @@ HookBus 支持 `priority`（越大越先执行）：
 
 ---
 
-### 6.5 `22_xin_jushou_zhuge_bonus.js`：界沮授红利（摸牌影响诸葛连弩）
+### 6.6 `22_xin_jushou_zhuge_bonus.js`：界沮授红利（摸牌影响诸葛连弩）
 
 元信息：
 
@@ -353,7 +521,7 @@ HookBus 支持 `priority`（越大越先执行）：
 
 ---
 
-### 6.6 `23_xin_jushou_jianying_ai.js`：界沮授 AI 加强（渐营优先）
+### 6.7 `23_xin_jushou_jianying_ai.js`：界沮授 AI 加强（渐营优先）
 
 元信息：
 
@@ -378,7 +546,7 @@ HookBus 支持 `priority`（越大越先执行）：
 
 ---
 
-### 6.7 `30_friendly_rage_egg_throw.js`：友善互动（怒气丢鸡蛋）
+### 6.8 `30_friendly_rage_egg_throw.js`：友善互动（怒气丢鸡蛋）
 
 元信息：
 
@@ -421,7 +589,30 @@ HookBus 支持 `priority`（越大越先执行）：
 
 ---
 
-### 6.8 技能自定义tag补全（框架）【已迁移至扩展核心】
+### 6.9 `00_logger_danmaku_overlay.js`：Logger 弹幕层（AI 日志飘屏）
+
+元信息：
+
+- name：Logger 弹幕层（AI 日志飘屏）
+- version：1.0.2
+- 作用：启用后在屏幕叠加弹幕层；当“身临其境的AI”的 logger 输出日志时，将其以弹幕形式从右向左飘过
+
+接入点：
+
+- 通过 `logManager.register(...)` 注册为独立 logger（由 logManager 广播驱动），无需 patch console logger
+- 当 body 就绪后创建弹幕 overlay（`position: fixed` + `pointer-events: none`），每条弹幕动画结束自动移除
+- 支持 `%s/%d/%i/%f/%o/%O/%%` 格式化（弹幕忽略 `%c` 样式参数）
+- 输出前支持关键字过滤：命中黑名单跳过；未命中黑名单则仅白名单命中才输出
+
+可调参数（⚙）：
+
+- `rows`：弹幕行数（`1~10`，默认 `6`）
+- `whitelist`：白名单关键字（多行，每行一个；默认空；空=不输出任何弹幕）
+- `blacklist`：黑名单关键字（多行，每行一个；默认空；命中则不输出，且优先于白名单）
+
+---
+
+### 6.10 技能自定义tag补全（框架）【已迁移至扩展核心】
 
 说明：
 
@@ -470,6 +661,49 @@ HookBus 支持 `priority`（越大越先执行）：
 示例（当前内置）：
 
 - 黄盖 `kurou`（苦肉）：`slqj_ai_maixie` + `slqj_ai_active_maixie` + `slqj_ai_draw_self`
+
+---
+
+### 6.11 `03_logger_forward_game_log.js`：Logger 转发到 game.log
+
+元信息：
+
+- name：Logger 转发到 game.log
+- version：1.0.1
+- 作用：把“身临其境的AI”的 logManager 输出转发为引擎 `game.log(...)`（仅本地/非联机/非connectMode 生效）
+
+接入点：
+
+- 注册一个 logManager logger，并在 logger 输出时写入 `game.log(...)`（不改变 AI 行为）
+
+可调参数（⚙）：
+
+- `whitelist`：白名单关键字（多行，每行一个；默认 `"[身临其境的AI]"`；留空=不输出任何转发日志）
+- `blacklist`：黑名单关键字（多行，每行一个；默认 `"[runForSkillIds]\n[attitude]"`；命中则不输出，且优先于白名单）
+
+---
+
+### 6.12 `11_compare_pindian_card_choice.js`：拼点被发起人让点/争点
+
+元信息：
+
+- name：拼点：被发起人让点/争点
+- version：1.0.0
+- 作用：当 AI 作为拼点的被发起人时：若对发起人态度为友方则总选点数更小的牌；否则总选点数更大的牌
+
+接入点：
+
+- 订阅 `slqj_ai_score`（chooseCard 上下文），仅在 `event.type === "compare"` 且 `被发起人 !== 发起人` 时生效
+
+策略要点：
+
+- 队友判定：`get.attitude(被发起人, 发起人) > friendAttitudeMin`
+- 若队友：按“点数更小”优先选牌；若敌对：按“点数更大”优先选牌
+- 同点数时用 `get.value` 做稳定 tie-break（优先牺牲低价值牌，不改变点数主序）
+
+可调参数（⚙）：
+
+- `friendAttitudeMin`：友方阈值（默认 `0`）
 
 ---
 

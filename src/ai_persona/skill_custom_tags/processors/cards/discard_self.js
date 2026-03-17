@@ -36,7 +36,7 @@ export function createDiscardSelfProcessor() {
 	);
 	const reAllByFilter = new RegExp(String.raw`你(?:可|可以)?弃置([^。]{0,20})的所有(?:手牌|牌)`, "g");
 	const reDiscardGainedHandcards = /你弃置[^。]{0,30}获得的手牌/;
-	// 兼容：“你弃置…展示的手牌”（常见于“展示→弃置展示牌”口径）。
+	// 兼容：“你弃置…展示的手牌”（常见于“展示→弃置展示牌”规则）。
 	const reDiscardDisplayedHandcards = /你弃置[^。]{0,40}展示的手牌/;
 	// 兼容：“你弃置手牌中任意张……的牌/你弃置手牌中X张……的牌”。
 	const reDiscardHandcardsIn = new RegExp(String.raw`你弃置[^。]{0,20}手牌中(?:至少|至多)?(?:${NUM}|任意)张[^。]{0,30}牌`);

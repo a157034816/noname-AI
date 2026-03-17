@@ -17,7 +17,6 @@ import {
   onRewriteGainResultEvidence,
   onUseSkillEvidence,
 } from "./events/identity_events.js";
-import { onUseCardAfterBasicTempo } from "./events/basic_tempo_events.js";
 import { onRecentAttackMark, onRecentAttackClear } from "./events/recent_attack_events.js";
 import {
   onDamageEndRage,
@@ -214,7 +213,6 @@ export function installPersonaSystem({ lib, game, get, ai, _status, config }) {
 	game.__slqjAiPersona.onRewriteDiscardResultEvidence = onRewriteDiscardResultEvidence;
 	game.__slqjAiPersona.onRewriteGainResultEvidence = onRewriteGainResultEvidence;
 	game.__slqjAiPersona.onUseSkillEvidence = onUseSkillEvidence;
-	game.__slqjAiPersona.onUseCardAfterBasicTempo = onUseCardAfterBasicTempo;
 	game.__slqjAiPersona.onRecentAttackMark = onRecentAttackMark;
 	game.__slqjAiPersona.onRecentAttackClear = onRecentAttackClear;
 	game.__slqjAiPersona.shouldForbidRescueRecentAttackInChooseBool = shouldForbidRescueRecentAttackInChooseBool;

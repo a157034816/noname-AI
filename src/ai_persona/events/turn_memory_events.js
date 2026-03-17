@@ -87,7 +87,7 @@ function resolveSourcePlayerFromEventChain(evt, victim) {
 /**
  * 将一次事件写入“相关的本地 AI 玩家”的回合记忆。
  *
- * 相关口径（与需求一致）：
+ * 相关规则（与需求一致）：
  * - 只记录 observer 自己被影响（targetPid===observerPid）
  * - 或 observer 自己造成（sourcePid===observerPid）
  *

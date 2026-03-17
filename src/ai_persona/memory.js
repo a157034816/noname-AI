@@ -73,7 +73,6 @@ export function initMentalModel(player, game, _status) {
 		zhuHelp: {},
 		zhuHarm: {},
 		habits: {},
-		basicTempo: {},
 	};
 	st.runtime = {
 		turnsTaken: 0,
@@ -105,7 +104,7 @@ export function initMentalModel(player, game, _status) {
 	}
 
 	// 清理：防止玩家变化导致脏数据无限增长
-	for (const mapName of ["firstImpression", "evidence", "grudge", "rageTowards", "zhuSignal", "zhuHelp", "zhuHarm", "basicTempo"]) {
+	for (const mapName of ["firstImpression", "evidence", "grudge", "rageTowards", "zhuSignal", "zhuHelp", "zhuHarm"]) {
 		const map = st.memory[mapName];
 		if (!map || typeof map !== "object") continue;
 		for (const key of Object.keys(map)) {
@@ -149,8 +148,6 @@ export function decayMentalModel(player) {
 	const zhuRate = clamp(0.9 + (traits.insight || 0) * 0.05, 0.9, 0.98);
 	// 仇恨衰减：小心眼更记仇，但也会慢慢淡忘
 	const grudgeRate = clamp(0.88 + (traits.revengeWeight || 1) * 0.03, 0.88, 0.97);
-	// 基本牌节奏推断衰减：避免一次“早出杀”永久锁死印象
-	const tempoRate = clamp(0.9 + (traits.insight || 0) * 0.05, 0.9, 0.97);
 	// 怒气衰减：按人格类型设定（更“上头”的人格更难冷静）
 	const personaId = String(persona.id || "");
 	const rageCfg = RAGE_DECAY_RATES[personaId] || RAGE_DECAY_RATES.default;
@@ -189,15 +186,6 @@ export function decayMentalModel(player) {
 	for (const key of Object.keys(mem.zhuHarm || {})) {
 		mem.zhuHarm[key] *= zhuRate;
 		if (mem.zhuHarm[key] < 0.05) mem.zhuHarm[key] = 0;
-	}
-
-	for (const key of Object.keys(mem.basicTempo || {})) {
-		const rec = mem.basicTempo[key];
-		if (!rec || typeof rec !== "object") continue;
-		if (typeof rec.sha === "number" && !Number.isNaN(rec.sha)) {
-			rec.sha *= tempoRate;
-			if (Math.abs(rec.sha) < 0.05) rec.sha = 0;
-		}
 	}
 }
 

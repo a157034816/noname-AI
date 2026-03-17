@@ -22,7 +22,7 @@ function safeGetCardInfo(card, get) {
 }
 
 /**
- * 判断某牌是否属于“群体/全体”指向（selectTarget:-1 口径）。
+ * 判断某牌是否属于“群体/全体”指向（selectTarget:-1 规则）。
  *
  * @param {*} card
  * @param {*} get
@@ -54,7 +54,7 @@ function safeGetCardAiTag(card, tag, get) {
 /**
  * 判断是否为“单目标主动进攻”（用于“刚刚攻击的人我不救”的触发标记）。
  *
- * 判定口径（保守）：
+ * 判定规则（保守）：
  * - 仅单目标：trigger.targets.length===1
  * - 排除“群体/全体”牌：selectTarget:-1
  * - 需要具备伤害倾向：get.tag(card,"damage") 或常见直伤牌名兜底

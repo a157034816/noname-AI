@@ -56,7 +56,7 @@ export function initAllAiPlayers(game, _status) {
 	const personaEnabled = getPersonaEnabledCfg(game);
 	for (const p of game.players) {
 		if (!p) continue;
-		// 自机始终初始化；其余玩家仍按“本地 AI”口径筛选
+		// 自机始终初始化；其余玩家仍按“本地 AI”规则筛选
 		if (p !== game.me && !isLocalAIPlayer(p, game, _status)) continue;
 		const st = ensureStorage(p);
 		const beforePersona = st.persona;

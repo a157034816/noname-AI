@@ -16,6 +16,37 @@ export const slqjAiScriptMeta = {
 };
 
 /**
+ * scripts 插件配置（用于“脚本插件管理 -> 配置(⚙)”）。
+ *
+ * @type {{version:1, items:Array<any>}}
+ */
+export const slqjAiScriptConfig = {
+	version: 1,
+	items: [
+		{ key: "enableGreedyLookahead", name: "启用贪心前瞻", type: "boolean", default: true, description: "开启：额外估计下一步是否更容易继续约数/倍数链（启发式近似）。" },
+		{
+			key: "greedyLookaheadMode",
+			name: "前瞻策略模式",
+			type: "select",
+			default: "A",
+			options: [
+				{ value: "A", label: "A（约数链优先）" },
+				{ value: "B", label: "B（倍数爆发优先）" },
+				{ value: "random", label: "random（每局随机）" },
+			],
+		},
+		{ key: "hookPriority", name: "Hook 优先级", type: "number", default: 1, min: -1000, max: 1000, step: 1 },
+		{ key: "debug", name: "调试日志", type: "boolean", default: false, description: "也可通过 dev 或控制台开关启用。" },
+		{ key: "disableBuiltinNoise", name: "禁用内置噪声", type: "boolean", default: true },
+		{ key: "enableJuezhiPick", name: "启用爵制选牌优化", type: "boolean", default: true },
+		{ key: "divisorBonus", name: "约数加权", type: "number", default: 1.0, min: -999, max: 999, step: 0.05 },
+		{ key: "multipleBonus", name: "倍数加权", type: "number", default: 0.45, min: -999, max: 999, step: 0.05 },
+		{ key: "breakPenalty", name: "断链惩罚", type: "number", default: 0.6, min: -999, max: 999, step: 0.05 },
+		{ key: "smallMarkMultipleExtra", name: "小标记倍数额外加权", type: "number", default: 0.35, min: -999, max: 999, step: 0.05 },
+	],
+};
+
+/**
  * 全局开关：是否启用“贪心 + 少量前瞻（1 步）”。
  *
  * - 关闭：仅使用当前牌的局部收益（约数/倍数/断链等）做贪心影响
@@ -42,7 +73,6 @@ const GREEDY_LOOKAHEAD_MODE = "A";
  *
  * @type {{
  *  hookPriority:number,
- *  onlyLocalAi:boolean,
  *  debug:boolean,
  *  disableBuiltinNoise:boolean,
  *  enableJuezhiPick:boolean,
@@ -54,7 +84,6 @@ const GREEDY_LOOKAHEAD_MODE = "A";
  */
 const DEFAULT_CFG = {
 	hookPriority: 1,
-	onlyLocalAi: true,
 	debug: false,
 	disableBuiltinNoise: true,
 	enableJuezhiPick: true,
@@ -83,9 +112,14 @@ export default function setup(ctx) {
 	if (runtime.installed) return;
 
 	runtime.installed = true;
-	runtime.cfg = { ...DEFAULT_CFG };
+	const scriptCfg = (ctx && ctx.scriptConfig) || {};
+	runtime.cfg = { ...DEFAULT_CFG, ...scriptCfg };
 	runtime._status = _status || null;
 	runtime.get = get || null;
+	runtime.enableGreedyLookahead =
+		typeof scriptCfg.enableGreedyLookahead === "boolean" ? scriptCfg.enableGreedyLookahead : ENABLE_GREEDY_LOOKAHEAD;
+	runtime.greedyLookaheadMode =
+		typeof scriptCfg.greedyLookaheadMode === "string" ? String(scriptCfg.greedyLookaheadMode) : GREEDY_LOOKAHEAD_MODE;
 
 	// 允许通过 dev 或控制台开关打开更详细日志
 	try {
@@ -95,11 +129,11 @@ export default function setup(ctx) {
 			globalThis.__slqjAiPeixiuTakeoverDebug === true;
 	} catch (e) {}
 	const logger = createLogger(lib, runtime);
-	logger.info("installed", { onlyLocalAi: !!runtime.cfg?.onlyLocalAi, debug: logger.isDebug() });
+	logger.info("installed", { debug: logger.isDebug() });
 	runtime.lookaheadStrategy = resolveLookaheadStrategy(game, runtime);
 	logger.info("greedy-lookahead", {
-		enabled: ENABLE_GREEDY_LOOKAHEAD,
-		mode: GREEDY_LOOKAHEAD_MODE,
+		enabled: runtime.enableGreedyLookahead,
+		mode: runtime.greedyLookaheadMode,
 		strategy: runtime.lookaheadStrategy || null,
 	});
 
@@ -130,7 +164,7 @@ function getOrCreateRuntime(game) {
  * 决定本局使用的“前瞻策略”（A/B）。
  *
  * - 若已存在（例如脚本重复加载），直接复用
- * - `GREEDY_LOOKAHEAD_MODE === "random"` 时，本局随机选 A 或 B，并固定整局
+ * - `greedyLookaheadMode === "random"` 时，本局随机选 A 或 B，并固定整局
  *
  * @param {*} game
  * @param {*} runtime
@@ -142,10 +176,13 @@ function resolveLookaheadStrategy(game, runtime) {
 		if (existing === "A" || existing === "B") return existing;
 	} catch (e) {}
 
-	if (!ENABLE_GREEDY_LOOKAHEAD) return null;
+	const enabled =
+		typeof runtime?.enableGreedyLookahead === "boolean" ? runtime.enableGreedyLookahead : ENABLE_GREEDY_LOOKAHEAD;
+	if (!enabled) return null;
 
-	if (GREEDY_LOOKAHEAD_MODE === "A") return "A";
-	if (GREEDY_LOOKAHEAD_MODE === "B") return "B";
+	const mode = typeof runtime?.greedyLookaheadMode === "string" ? runtime.greedyLookaheadMode : GREEDY_LOOKAHEAD_MODE;
+	if (mode === "A") return "A";
+	if (mode === "B") return "B";
 
 	// random：按“每局”固定。这里用 runtime 存储即可满足“同局固定”的需求。
 	try {
@@ -471,16 +508,10 @@ function installRuntimeApi({ game, lib, runtime }) {
 	runtime.api.filterUseCard1 = (event, player) => {
 		try {
 			if (!player) return false;
-			// 自机：默认不影响手操；仅在托管（isAuto===true）时启用（避免影响手操）
-			if (player === game.me) {
-				const st = runtime._status || globalThis._status;
-				if (!isLocalAIPlayer(player, game, st)) return false;
-			}
+			// 默认仅本地 AI 生效；自机仅在托管（isAuto===true）时视为本地 AI
+			const st = runtime._status || globalThis._status;
+			if (!isLocalAIPlayer(player, game, st)) return false;
 			if (!isPeixiuPlayer(player)) return false;
-			if (runtime.cfg?.onlyLocalAi) {
-				const st = runtime._status || globalThis._status;
-				if (!isLocalAIPlayer(player, game, st)) return false;
-			}
 			return !!event?.card;
 		} catch (e) {
 			return false;
@@ -567,10 +598,8 @@ function installScoreHook({ game, hooks, runtime }) {
 			const player = ctx.player;
 			if (!isPeixiuPlayer(player)) return;
 
-			if (runtime.cfg?.onlyLocalAi) {
-				const st = runtime._status || globalThis._status;
-				if (!isLocalAIPlayer(player, ctx.game || game, st)) return;
-			}
+			const st = runtime._status || globalThis._status;
+			if (!isLocalAIPlayer(player, ctx.game || game, st)) return;
 
 			if (runtime.cfg?.disableBuiltinNoise) {
 				ctx.skipBuiltin = true;

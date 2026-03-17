@@ -1,6 +1,6 @@
 # UI 面板、统计与回合记忆（AI 标记）
 
-本文解释扩展的 UI 可视化层：`AI` 标记面板展示什么、这些数据从哪里来、以及“统计/回合记忆/基本牌推断”是如何记录的。
+本文解释扩展的 UI 可视化层：`AI` 标记面板展示什么、这些数据从哪里来、以及“统计/回合记忆”是如何记录的。
 
 对应源码：
 
@@ -8,7 +8,6 @@
 - 面板内容（中/英）：`src/ai_persona/ui/inspect_valuebox_i18n.js`
 - 统计结构：`src/ai_persona/stats.js`
 - 回合记忆：`src/ai_persona/events/turn_memory_events.js`
-- 基本牌节奏推断：`src/ai_persona/events/basic_tempo_events.js`
 
 ---
 
@@ -119,31 +118,6 @@ turnMemory 的写入不是“全局广播给每个 AI”，而是只记录：
 
 - 单回合最多保留 `MAX_TURN_EVENTS = 80`
 - UI 展示只取最近 10 条
-
----
-
-## 5) 基本牌节奏推断（basicTempo）：杀密度倾向
-
-### 5.1 记录逻辑（公开信息）
-`basic_tempo_events.js` 在 `useCardAfter`（且发生在出牌阶段）统计：
-
-> 对手【杀】出的越快，越可能“杀多”；连续出杀信号更强。
-
-它会把推断写入 **观察者的**：
-
-- `memory.basicTempo[targetPid].sha`（范围 clamp 到 [-2,2]）
-- 同时记录 `shaSamples`（样本数）与 `lastRound`
-
-### 5.2 UI 展示
-面板会在“基本牌推断”区块展示：
-
-- 只展示 `|sha| >= 0.2` 的目标
-- 按绝对值排序取 Top 5
-
-用途：
-
-- 让玩家/开发者直观看到推断是否生效
-- 也被默认策略 hooks 用于轻度影响（例如控场/拆迁优先处理“杀密度更高”的敌人）
 
 ---
 

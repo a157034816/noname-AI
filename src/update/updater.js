@@ -1,5 +1,5 @@
 import { SLQJ_AI_UPDATE_REPO, SLQJ_AI_UPDATE_ZIP_ROOT_NAME } from "../version.js";
-import { fetchLatestRelease } from "./github.js";
+import { fetchLatestRelease, fetchReleases } from "./github.js";
 import { compareSemver } from "./semver.js";
 import { downloadToBytes } from "./download.js";
 import { applyUpdateFromZip } from "./apply_update.js";
@@ -50,6 +50,121 @@ export async function checkForUpdate(opts) {
     assetName: latest.assetName,
     downloadUrl: latest.downloadUrl,
   };
+}
+
+/**
+ * @typedef {{
+ *  version: string,
+ *  tagName: string,
+ *  title: string,
+ *  body: string,
+ *  htmlUrl: string,
+ *  publishedAt: string,
+ * }} SlqjAiReleaseNote
+ */
+
+/**
+ * @typedef {{
+ *  ok: true,
+ *  notes: SlqjAiReleaseNote[],
+ *  warning?: string,
+ * } | {
+ *  ok: false,
+ *  error: string,
+ * }} SlqjAiReleaseNotesResult
+ */
+
+/**
+ * 拉取并计算“当前版本 -> latest”的更新内容区间（用于更新弹窗展示）。
+ *
+ * 默认：不包含 draft / pre-release。
+ *
+ * @param {{currentVersion:string, latestVersion:string, latestTag:string}} opts
+ * @returns {Promise<SlqjAiReleaseNotesResult>}
+ */
+export async function fetchReleaseNotesBetweenVersions(opts) {
+  const currentVersion = String(opts?.currentVersion || "").trim();
+  const latestVersion = String(opts?.latestVersion || "").trim();
+  const latestTag = String(opts?.latestTag || "").trim();
+  if (!currentVersion || !latestVersion) return { ok: false, error: "bad args" };
+
+  const list = await fetchReleases(SLQJ_AI_UPDATE_REPO, { perPage: 30, maxPages: 5, includePrerelease: false });
+  if (!list.ok) return { ok: false, error: list.error };
+
+  const releases = Array.isArray(list.releases) ? list.releases : [];
+  if (!releases.length) return { ok: true, notes: [] };
+
+  // 优先走 semver 区间筛选（最准确）。
+  const cmp = compareSemver(currentVersion, latestVersion);
+  if (cmp !== null) {
+    const picked = new Map();
+    for (const r of releases) {
+      const rv = String(r?.version || "").trim();
+      if (!rv) continue;
+      // current < rv <= latest
+      const c1 = compareSemver(currentVersion, rv);
+      if (c1 !== -1) continue;
+      const c2 = compareSemver(rv, latestVersion);
+      if (c2 !== -1 && c2 !== 0) continue;
+      if (!picked.has(rv)) picked.set(rv, r);
+    }
+    const notes = Array.from(picked.values())
+      .sort((a, b) => {
+        const c = compareSemver(String(a?.version || ""), String(b?.version || ""));
+        return c === null ? 0 : c;
+      })
+      .map((r) => {
+        return {
+          version: String(r?.version || "").trim(),
+          tagName: String(r?.tagName || "").trim(),
+          title: String(r?.title || "").trim(),
+          body: typeof r?.body === "string" ? r.body : String(r?.body || ""),
+          htmlUrl: String(r?.htmlUrl || "").trim(),
+          publishedAt: String(r?.publishedAt || "").trim(),
+        };
+      });
+    return { ok: true, notes };
+  }
+
+  // 降级：无法比较版本时，按 release 时间从新到旧回溯直到命中当前版本 tag。
+  /** @type {any[]} */
+  const notesDesc = [];
+  let foundCurrent = false;
+  for (const r of releases) {
+    const v = String(r?.version || "").trim();
+    const tag = String(r?.tagName || "").trim();
+    if ((v && v === currentVersion) || (tag && tag === currentVersion)) {
+      foundCurrent = true;
+      break;
+    }
+    // 尝试额外兼容：tag 为 v{current}
+    if (tag && tag.toLowerCase() === ("v" + currentVersion).toLowerCase()) {
+      foundCurrent = true;
+      break;
+    }
+    notesDesc.push(r);
+  }
+
+  const warning = foundCurrent
+    ? ""
+    : "未在 GitHub Releases 中找到与当前版本一致的 tag，可能是手动安装/本地版本与发布版本不一致；仅展示最近的更新内容。";
+
+  const notes = notesDesc
+    .slice()
+    .reverse()
+    .map((r) => {
+      return {
+        version: String(r?.version || "").trim(),
+        tagName: String(r?.tagName || "").trim(),
+        title: String(r?.title || "").trim(),
+        body: typeof r?.body === "string" ? r.body : String(r?.body || ""),
+        htmlUrl: String(r?.htmlUrl || "").trim(),
+        publishedAt: String(r?.publishedAt || "").trim(),
+      };
+    });
+
+  if (warning) return { ok: true, notes, warning };
+  return { ok: true, notes };
 }
 
 /**

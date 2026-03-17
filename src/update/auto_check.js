@@ -1,5 +1,5 @@
 import { checkForUpdate } from "./updater.js";
-import { get as getLogger } from "../logger/manager.js";
+import logManager from "../logger/manager.js";
 
 const LAST_CHECK_KEY = "slqj_ai_update_last_check_ts";
 
@@ -13,7 +13,7 @@ export async function maybeAutoCheckForUpdates(opts) {
   const game = opts?.game;
   const lib = opts?.lib;
   const config = opts?.config;
-  const logger = getLogger("console");
+  const logger = logManager;
 
   const connectMode = !!opts?.connectMode;
   if (connectMode) return null;

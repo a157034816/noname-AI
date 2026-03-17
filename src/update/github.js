@@ -15,6 +15,32 @@ const GITHUB_API_BASE = "https://api.github.com";
  */
 
 /**
+ * @typedef {{
+ *  id?: number,
+ *  tag_name?: string,
+ *  html_url?: string,
+ *  name?: string,
+ *  body?: string,
+ *  draft?: boolean,
+ *  prerelease?: boolean,
+ *  published_at?: string,
+ * }} GithubReleaseItem
+ */
+
+/**
+ * @typedef {{
+ *  tagName: string,
+ *  version: string,
+ *  htmlUrl: string,
+ *  title: string,
+ *  body: string,
+ *  publishedAt: string,
+ *  prerelease: boolean,
+ *  draft: boolean,
+ * }} SlqjAiGithubRelease
+ */
+
+/**
  * @param {GithubReleaseAsset[]} assets
  * @returns {{ name: string, downloadUrl: string, apiUrl: string }|null}
  */
@@ -94,6 +120,90 @@ export async function fetchLatestRelease(repo) {
       // 优先使用 GitHub Assets API（更稳定，支持重定向到 release-assets 域名）
       downloadUrl: asset.apiUrl || asset.downloadUrl,
     };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message ? e.message : e) || "unknown" };
+  }
+}
+
+/**
+ * 获取 releases 列表（GitHub API: releases）。
+ *
+ * @param {{owner:string, repo:string}} repo
+ * @param {{perPage?:number, maxPages?:number, includePrerelease?:boolean}} [opts]
+ * @returns {Promise<{ok:true, releases:SlqjAiGithubRelease[]} | {ok:false, error:string, status?:number}>}
+ */
+export async function fetchReleases(repo, opts) {
+  const owner = String(repo?.owner || "").trim();
+  const name = String(repo?.repo || "").trim();
+  if (!owner || !name) return { ok: false, error: "bad repo" };
+
+  const includePrerelease = opts?.includePrerelease === true;
+
+  let perPage = 30;
+  try {
+    const n = Number(opts?.perPage);
+    if (Number.isFinite(n) && n > 0) perPage = Math.floor(n);
+  } catch (e) {}
+  if (perPage < 1) perPage = 1;
+  if (perPage > 100) perPage = 100;
+
+  let maxPages = 5;
+  try {
+    const n = Number(opts?.maxPages);
+    if (Number.isFinite(n) && n > 0) maxPages = Math.floor(n);
+  } catch (e) {}
+  if (maxPages < 1) maxPages = 1;
+  if (maxPages > 10) maxPages = 10;
+
+  /** @type {SlqjAiGithubRelease[]} */
+  const releases = [];
+  const seenTags = new Set();
+
+  try {
+    if (typeof fetch !== "function") return { ok: false, error: "fetch unavailable" };
+
+    for (let page = 1; page <= maxPages; page++) {
+      const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/releases?per_page=${perPage}&page=${page}`;
+
+      const resp = await fetch(url, {
+        method: "GET",
+        headers: {
+          Accept: "application/vnd.github+json",
+        },
+      });
+
+      if (!resp.ok) return { ok: false, error: `http ${resp.status}`, status: resp.status };
+
+      /** @type {GithubReleaseItem[]|any} */
+      const list = await resp.json();
+      if (!Array.isArray(list)) return { ok: false, error: "bad response" };
+      if (!list.length) break;
+
+      for (const item of list) {
+        const tagName = String(item?.tag_name || "").trim();
+        if (!tagName) continue;
+        if (seenTags.has(tagName)) continue;
+        seenTags.add(tagName);
+
+        const draft = !!item?.draft;
+        if (draft) continue;
+        const prerelease = !!item?.prerelease;
+        if (prerelease && !includePrerelease) continue;
+
+        const htmlUrl = String(item?.html_url || "").trim();
+        const title = String(item?.name || "").trim();
+        const body = typeof item?.body === "string" ? item.body : String(item?.body || "");
+        const publishedAt = String(item?.published_at || "").trim();
+        const version = normalizeTagToVersion(tagName);
+
+        releases.push({ tagName, version, htmlUrl, title, body, publishedAt, prerelease, draft });
+      }
+
+      // 若返回条数不足 perPage，通常表示已经到末页。
+      if (list.length < perPage) break;
+    }
+
+    return { ok: true, releases };
   } catch (e) {
     return { ok: false, error: String(e && e.message ? e.message : e) || "unknown" };
   }

@@ -17,14 +17,25 @@ export const slqjAiScriptMeta = {
 };
 
 /**
+ * scripts 插件配置（用于“脚本插件管理 -> 配置(⚙)”）。
+ *
+ * @type {{version:1, items:Array<any>}}
+ */
+export const slqjAiScriptConfig = {
+	version: 1,
+	items: [
+		{ key: "hookPriority", name: "Hook 优先级", type: "number", default: 1, min: -1000, max: 1000, step: 1 },
+		{ key: "debug", name: "调试日志", type: "boolean", default: false, description: "也可通过 dev 或控制台开关启用。" },
+	],
+};
+
+/**
  * 默认策略参数（可在脚本内调整）。
  *
- * @type {{hookPriority:number, onlyLocalAi:boolean, affectManagedMe:boolean, debug:boolean}}
+ * @type {{hookPriority:number, debug:boolean}}
  */
 const DEFAULT_CFG = {
 	hookPriority: 1,
-	onlyLocalAi: true,
-	affectManagedMe: true,
 	debug: false,
 };
 
@@ -47,7 +58,8 @@ export default function setup(ctx) {
 	if (runtime.installed) return;
 
 	runtime.installed = true;
-	runtime.cfg = { ...DEFAULT_CFG };
+	const scriptCfg = (ctx && ctx.scriptConfig) || {};
+	runtime.cfg = { ...DEFAULT_CFG, ...scriptCfg };
 	runtime._status = _status || null;
 
 	try {
@@ -58,7 +70,7 @@ export default function setup(ctx) {
 	} catch (e) {}
 
 	const logger = createLogger(lib, runtime);
-	logger.info("installed", { onlyLocalAi: !!runtime.cfg?.onlyLocalAi, debug: logger.isDebug() });
+	logger.info("installed", { debug: logger.isDebug() });
 
 	tryInstallQingshiPatch({ game, lib, runtime, logger });
 	tryInstallZhizhePatch({ game, lib, runtime, logger });
@@ -176,18 +188,9 @@ function shouldAffectPlayer(player, game, runtime, _status) {
 	if (!player) return false;
 	if (!isWuZhugeliangPlayer(player)) return false;
 
-	// 玩家本人（game.me）：默认不影响手操；仅在“托管”时允许接管（可通过 affectManagedMe 关闭）。
-	if (player === game?.me) {
-		if (!runtime?.cfg?.affectManagedMe) return false;
-		const st = _status || runtime?._status || globalThis._status;
-		if (!isLocalAIPlayer(player, game, st)) return false;
-		return true;
-	}
-
-	if (runtime?.cfg?.onlyLocalAi) {
-		const st = _status || runtime?._status || globalThis._status;
-		if (!isLocalAIPlayer(player, game, st)) return false;
-	}
+	const st = _status || runtime?._status || globalThis._status;
+	// 默认仅本地 AI 生效；玩家本人（game.me）仅在“托管”时视为本地 AI
+	if (!isLocalAIPlayer(player, game, st)) return false;
 	return true;
 }
 

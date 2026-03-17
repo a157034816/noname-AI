@@ -8,10 +8,13 @@
  * @property {*} _status
  * @property {import("./ai_persona/lib/jsdoc_types.js").SlqjAiExtensionConfig|null} config
  * @property {import("./ai_persona/lib/jsdoc_types.js").SlqjAiHookBus|null} hooks
+ * @property {string=} scriptFile 当前脚本文件名（例如：`01_xxx.js`）
+ * @property {Record<string, any>=} scriptConfig 当前脚本生效配置（已合并默认值+用户覆盖）
  */
 
 import { listExtensionScriptFiles, readScriptsRegistry, getScriptsLoadPlan } from "./scripts_registry.js";
-import { get as getLogger } from "./logger/manager.js";
+import { readScriptsConfig, normalizeScriptConfigSchema, resolveScriptConfigValues } from "./scripts_config.js";
+import logManager from "./logger/manager.js";
 
 /**
  * scripts 插件模块的“约定入口”集合。
@@ -49,7 +52,7 @@ export async function loadExtensionScripts(opts) {
   const game = opts ? opts.game : null;
   const lib = opts ? opts.lib : null;
   const config = opts ? opts.config : null;
-  const logger = getLogger("console");
+  const logger = logManager;
 
   const enable = config?.slqj_ai_scripts_enable ?? lib?.config?.slqj_ai_scripts_enable ?? true;
   if (!enable) return { loaded: [], failed: [], skipped: true };
@@ -64,6 +67,7 @@ export async function loadExtensionScripts(opts) {
 
   const files = listResult.files || [];
   const registry = readScriptsRegistry(config, lib);
+  const scriptsConfigStore = readScriptsConfig(config, lib);
   const plan = getScriptsLoadPlan(files, registry);
   const scriptsUrl = safeNewUrl("./scripts/", baseUrl);
   if (!scriptsUrl) return { loaded: [], failed: [], skipped: true };
@@ -91,9 +95,26 @@ export async function loadExtensionScripts(opts) {
       const mod = await import(modUrl.href);
       loaded.push(file);
 
+      /** @type {Record<string, any>} */
+      let scriptConfig = {};
+      try {
+        const schema = normalizeScriptConfigSchema(mod && mod.slqjAiScriptConfig);
+        const overrides =
+          scriptsConfigStore &&
+          scriptsConfigStore.overrides &&
+          typeof scriptsConfigStore.overrides === "object" &&
+          scriptsConfigStore.overrides[file] &&
+          typeof scriptsConfigStore.overrides[file] === "object"
+            ? scriptsConfigStore.overrides[file]
+            : null;
+        if (schema && Array.isArray(schema.items) && schema.items.length) {
+          scriptConfig = resolveScriptConfigValues(schema, overrides);
+        }
+      } catch (e) {}
+
       const fn = pickEntryFunction(mod);
       if (typeof fn === "function") {
-        await fn(ctx);
+        await fn({ ...ctx, scriptFile: file, scriptConfig });
       }
     } catch (e) {
       failed.push({ file, error: e });

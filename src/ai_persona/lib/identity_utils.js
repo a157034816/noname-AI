@@ -147,7 +147,7 @@ export function shouldUseOffensiveGroupTrick(player, game, get) {
 		if (!p) continue;
 		if (p.isDead && p.isDead()) continue;
 		const pid = String(p.identity || "");
-		// 口径：排除内奸（nei）后再进行人数对比
+		// 规则：排除内奸（nei）后再进行人数对比
 		if (pid === "nei") continue;
 
 		if (pid === "fan") {

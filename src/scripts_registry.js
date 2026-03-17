@@ -9,6 +9,16 @@ const EXTENSION_NAME = "身临其境的AI";
 const CONFIG_KEY = "slqj_ai_scripts_registry";
 const DEFAULT_SCRIPTS_DIR = `extension/${EXTENSION_NAME}/scripts`;
 
+/** @type {Record<string, boolean>} */
+const DEFAULT_DISABLED = {
+  // 该脚本会在屏幕叠加弹幕层（偏“刷屏/表现层”）；默认禁用，避免影响未配置用户的体验。
+  "00_logger_danmaku_overlay.js": true,
+  // 该脚本会将 logManager 日志转发到游戏内 game.log（可能刷屏）；默认禁用，避免影响对局体验。
+  "03_logger_forward_game_log.js": true,
+  // 该脚本会显著改变队友协作策略（投花确认 + 铁索传导连招）；默认禁用，避免无意影响对局体验。
+  "10_chain_elemental_teamplay.js": true,
+};
+
 /**
  * 读取并解析脚本插件注册表配置。
  *
@@ -22,7 +32,11 @@ const DEFAULT_SCRIPTS_DIR = `extension/${EXTENSION_NAME}/scripts`;
  */
 export function readScriptsRegistry(config, lib) {
   const raw = config?.[CONFIG_KEY] ?? lib?.config?.[CONFIG_KEY];
-  const fallback = /** @type {SlqjAiScriptsRegistryV1} */ ({ version: 1, order: [], disabled: {} });
+  const fallback = /** @type {SlqjAiScriptsRegistryV1} */ ({
+    version: 1,
+    order: [],
+    disabled: { ...DEFAULT_DISABLED },
+  });
 
   if (!raw) return fallback;
   if (typeof raw === "string") {
@@ -52,9 +66,18 @@ export function normalizeScriptsRegistry(files, registry) {
   const base = normalizeRegistryShape(registry);
 
   const order = [];
+  // 记录“用户注册表中已出现过”的脚本：用于判断“新增脚本”是否需要套用默认禁用策略。
+  // - 出现在 order：说明用户至少保存过一次顺序（或由 UI 归一化后落盘）
+  // - 出现在 disabled：说明用户明确禁用过（即便 order 里暂缺也视为已知）
+  const known = new Set();
   for (const f of base.order || []) {
     const name = String(f || "");
     if (fileSet.has(name) && !order.includes(name)) order.push(name);
+    if (name) known.add(name);
+  }
+  for (const k of Object.keys(base.disabled || {})) {
+    const name = String(k || "");
+    if (name) known.add(name);
   }
 
   const remaining = Array.from(fileSet).filter((f) => !order.includes(f)).sort((a, b) => a.localeCompare(b));
@@ -65,6 +88,14 @@ export function normalizeScriptsRegistry(files, registry) {
   for (const [k, v] of Object.entries(base.disabled || {})) {
     const name = String(k || "");
     if (fileSet.has(name) && v) disabled[name] = true;
+  }
+
+  // 对“新增脚本”套用默认禁用策略：
+  // - 仅当脚本在用户注册表中从未出现过（unknown）时才应用 DEFAULT_DISABLED
+  // - 避免“用户之前手动启用过默认禁用脚本，但升级后又被强制禁用”的体验问题
+  for (const f of remaining) {
+    if (known.has(f)) continue;
+    if (DEFAULT_DISABLED && DEFAULT_DISABLED[f]) disabled[f] = true;
   }
 
   return { version: 1, order, disabled };
@@ -92,17 +123,41 @@ export function getScriptsLoadPlan(files, registry) {
 /**
  * 持久化注册表到配置（同时写入 extension_ 前缀与无前缀键，保持与本扩展其他配置项一致）。
  *
+ * 说明：
+ * - 兼容部分环境配置落盘为异步写入（IndexedDB）。若不等待写入完成就重启/刷新，可能导致保存丢失。
+ *
  * @param {*} game
  * @param {SlqjAiScriptsRegistryV1} registry
- * @returns {boolean}
+ * @returns {Promise<boolean>}
  */
-export function saveScriptsRegistry(game, registry) {
-  if (!game || typeof game.saveConfig !== "function") return false;
+export async function saveScriptsRegistry(game, registry) {
+  if (!game) return false;
   const payload = JSON.stringify(normalizeRegistryShape(registry));
+  const prefixedKey = `extension_${EXTENSION_NAME}_${CONFIG_KEY}`;
   try {
-    game.saveConfig(`extension_${EXTENSION_NAME}_${CONFIG_KEY}`, payload);
-    game.saveConfig(CONFIG_KEY, payload);
-    return true;
+    if (game.promises && typeof game.promises.saveConfig === "function") {
+      await game.promises.saveConfig(prefixedKey, payload);
+      await game.promises.saveConfig(CONFIG_KEY, payload);
+      return true;
+    }
+    if (typeof game.saveConfig === "function") {
+      await new Promise((resolve) => {
+        try {
+          game.saveConfig(prefixedKey, payload, undefined, resolve);
+        } catch (e) {
+          resolve();
+        }
+      });
+      await new Promise((resolve) => {
+        try {
+          game.saveConfig(CONFIG_KEY, payload, undefined, resolve);
+        } catch (e) {
+          resolve();
+        }
+      });
+      return true;
+    }
+    return false;
   } catch (e) {
     return false;
   }
