@@ -2,27 +2,6 @@ import { guessIdentityFor, explainGuessIdentityFor } from "../guess_identity.js"
 import { getCampOutputCorePlayer, getPlayerCamp } from "../stats.js";
 
 /**
- * 判断当前是否满足“忠臣已全部阵亡”（基于真实身份）。
- *
- * 说明：
- * - 该判断仅用于身份局中后期的门槛放宽：当主忠侧已无忠臣存活时，误伤忠臣的风险显著下降
- * - 这里读取引擎真实身份字段，但仅用于布尔判定，不对外暴露任何玩家身份信息
- *
- * @param {*} game
- * @returns {boolean}
- */
-function isAllZhongDead(game) {
-	const players = (game && game.players) || [];
-	for (const p of players) {
-		if (!p) continue;
-		if (p.isDead && p.isDead()) continue;
-		const id = String(p.identity || "");
-		if (id === "zhong" || id === "mingzhong") return false;
-	}
-	return true;
-}
-
-/**
  * 按“猜测身份”判定某目标是否为敌方（仅用于身份局的保守目标门槛）。
  *
  * @param {*} selfIdentity
@@ -41,7 +20,11 @@ export function isGuessedEnemyIdentity(selfIdentity, guessIdentity) {
 }
 
 /**
- * 身份未明置时，判断目标是否可视为“已暴露敌方”（高软暴露 + 猜测为敌方 + 置信度足够）。
+ * 身份未明置时，判断目标是否可视为“已暴露敌方”（软暴露 + 猜测明确 + 置信度足够）。
+ *
+ * 约定：
+ * - `ai.shown >= 0.7` 视为“软暴露”
+ * - 身份猜测为 `unknown` 时不视为暴露（避免把信息不足的目标当作已暴露）
  *
  * @param {*} player
  * @param {*} target
@@ -56,26 +39,16 @@ export function isExposedEnemyTarget(player, target, game, get) {
 	// 已明置：允许使用引擎态度（此时信息已公开）
 	if (target.identityShown) return typeof get?.attitude === "function" ? get.attitude(player, target) < 0 : true;
 
-	// 未明置：仅在“高软暴露 + 猜测为敌方（且置信度足够）”时允许
+	// 未明置：仅在“软暴露 + 身份猜测明确（非 unknown）+ 置信度足够”时才视为暴露敌方
 	const selfId = String(player.identity || "");
 	if (selfId === "nei") return false;
 
-	// 残局策略：当忠臣已全部阵亡时，主忠侧以“态度负面”为主要敌对判据，避免因猜测 unknown 导致弃权。
-	if (get?.mode?.() === "identity" && ["zhu", "zhong", "mingzhong"].includes(selfId) && isAllZhongDead(game)) {
-		if (typeof get?.attitude === "function") {
-			try {
-				return get.attitude(player, target) < -0.6;
-			} catch (e) {
-				return false;
-			}
-		}
-	}
-
 	const shown = target.ai && typeof target.ai.shown === "number" ? target.ai.shown : 0;
-	if (shown < 0.85) return false;
-	const g = guessIdentityFor(player, target, game);
+	if (shown < 0.7) return false;
+	const g = guessIdentityFor(player, target, game, { disableSoftAssign: true });
 	const gid = String(g?.identity || "unknown");
 	const conf = typeof g?.confidence === "number" ? g.confidence : 0;
+	if (gid === "unknown") return false;
 	if (conf < 0.55) return false;
 	return isGuessedEnemyIdentity(player.identity, gid);
 }
