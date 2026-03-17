@@ -2438,59 +2438,54 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 		);
 	}
 
-	// 身份局策略：进攻范围内若存在已明置的敌人，则优先处理明置敌人，避免盲打未知身份目标
-	if (!game.__slqjAiPersona._shownEnemyFirstHookInstalled) {
-		game.__slqjAiPersona._shownEnemyFirstHookInstalled = true;
-		hooks.on(
-			"slqj_ai_score",
-			ctx => {
-				if (!ctx || ctx.kind !== "chooseTarget" || ctx.stage !== "final") return;
-				if (get?.mode?.() !== "identity") return;
-				if (typeof get?.itemtype === "function" && get.itemtype(ctx.candidate) !== "player") return;
-				const player = ctx.player;
-				const target = ctx.candidate;
-				if (!player || !target) return;
+		// 身份局策略：进攻范围内若存在“已暴露敌人”，则优先处理已暴露敌人，避免把输出浪费在未暴露目标身上
+		if (!game.__slqjAiPersona._shownEnemyFirstHookInstalled) {
+			game.__slqjAiPersona._shownEnemyFirstHookInstalled = true;
+			hooks.on(
+				"slqj_ai_score",
+				ctx => {
+					if (!ctx || ctx.kind !== "chooseTarget" || ctx.stage !== "final") return;
+					if (get?.mode?.() !== "identity") return;
+					if (typeof get?.itemtype === "function" && get.itemtype(ctx.candidate) !== "player") return;
+					const player = ctx.player;
+					const target = ctx.candidate;
+					if (!player || !target) return;
+					if (target === player) return;
 
-				// 内奸保留灵活性：不强制“明示敌人优先”
-				const selfId = String(player.identity || "");
-				if (selfId === "nei") return;
+					// 内奸保留灵活性：不强制“已暴露敌人优先”
+					const selfId = String(player.identity || "");
+					if (selfId === "nei") return;
 
-				// 只约束“盲打未知”：候选目标本身未明置
-				if (target.identityShown) return;
+					// 仅对“有害行为”（对目标收益为负）生效
+					const tv = getTargetUseValueFromEvent(player, target, ctx.event, get);
+					if (tv >= 0) return;
 
-				// 仅在“本就敌对倾向”的未知目标上生效，避免干扰牺牲/自损等友方目标逻辑
-				const att = safeAttitude(get, player, target);
-				if (att >= -0.6) return;
+					// 若目标已属于“已暴露敌人”，不惩罚（允许其正常被选中）
+					if (isExposedEnemyTarget(player, target, game, get)) return;
 
-				// 仅对“有害行为”（对目标收益为负）生效
-				const tv = getTargetUseValueFromEvent(player, target, ctx.event, get);
-				if (tv >= 0) return;
+					// 若候选集中存在“已暴露敌人”的可用目标（同样为有害目标），则对未暴露目标施加强惩罚
+					const all = Array.isArray(ctx.all) ? ctx.all : [];
+					if (!all.length) return;
 
-				// 若候选集中存在“已明置且敌对”的可用目标（同样为有害目标），则对未知目标施加强惩罚
-				const all = Array.isArray(ctx.all) ? ctx.all : [];
-				if (!all.length) return;
+					let hasExposedEnemy = false;
+					for (const p of all) {
+						if (!p || p === player) continue;
+						if (typeof get?.itemtype === "function" && get.itemtype(p) !== "player") continue;
+						if (!isExposedEnemyTarget(player, p, game, get)) continue;
+						const ptv = getTargetUseValueFromEvent(player, p, ctx.event, get);
+						if (ptv >= 0) continue;
+						hasExposedEnemy = true;
+						break;
+					}
+					if (!hasExposedEnemy) return;
 
-				let hasShownEnemy = false;
-				for (const p of all) {
-					if (!p || p === player) continue;
-					if (typeof get?.itemtype === "function" && get.itemtype(p) !== "player") continue;
-					if (!p.identityShown) continue;
-					const patt = safeAttitude(get, player, p);
-					if (patt >= -0.6) continue;
-					const ptv = getTargetUseValueFromEvent(player, p, ctx.event, get);
-					if (ptv >= 0) continue;
-					hasShownEnemy = true;
-					break;
-				}
-				if (!hasShownEnemy) return;
-
-				const base = typeof ctx.base === "number" && !Number.isNaN(ctx.base) ? ctx.base : 0;
-				const penalty = 4.2 + 0.35 * clampNumber(base, 0, 6);
-				ctx.score -= penalty;
-			},
-			{ priority: 3, title: "身份局：优先处理明置敌人" }
-		);
-	}
+					const base = typeof ctx.base === "number" && !Number.isNaN(ctx.base) ? ctx.base : 0;
+					const penalty = 8 + 0.25 * clampNumber(base, 0, 8);
+					ctx.score -= penalty;
+				},
+				{ priority: 3, title: "身份局：优先处理已暴露敌人" }
+			);
+		}
 
 	// 身份局策略：首轮反贼若能对主公用【杀】，则更偏向先打主公（避免“能打主公却先砍别人”）
 	if (!game.__slqjAiPersona._fanRound1ShaZhuFirstHookInstalled) {
