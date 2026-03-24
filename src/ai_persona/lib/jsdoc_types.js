@@ -139,6 +139,9 @@ export {};
  *  slqj_ai_scripts_registry?: (string|object),
  *  slqj_ai_scripts_config?: (string|object),
  *  slqj_ai_scripts_debug?: boolean,
- *  slqj_ai_visual_debug_enable?: boolean
+ *  slqj_ai_visual_debug_enable?: boolean,
+ *  slqj_ai_update_auto_check?: boolean,
+ *  slqj_ai_update_channel?: ("stable"|"pr"|string),
+ *  slqj_ai_update_pr_number?: (string|number)
  * }} SlqjAiExtensionConfig
  */ 

@@ -1,4 +1,5 @@
-import { normalizeTagToVersion } from "./semver.js";
+import { compareSemver, extractPrBuildInfo, normalizeTagToVersion } from "./semver.js";
+import { normalizeUpdateChannel, normalizeUpdatePrNumber, UPDATE_CHANNEL_PR } from "./settings.js";
 
 const GITHUB_API_BASE = "https://api.github.com";
 
@@ -29,6 +30,29 @@ const GITHUB_API_BASE = "https://api.github.com";
 
 /**
  * @typedef {{
+ *  full_name?: string,
+ * }} GithubRepoRef
+ */
+
+/**
+ * @typedef {{
+ *  repo?: GithubRepoRef|null,
+ * }} GithubPullRequestHead
+ */
+
+/**
+ * @typedef {{
+ *  number?: number,
+ *  title?: string,
+ *  html_url?: string,
+ *  draft?: boolean,
+ *  updated_at?: string,
+ *  head?: GithubPullRequestHead|null,
+ * }} GithubPullRequestItem
+ */
+
+/**
+ * @typedef {{
  *  tagName: string,
  *  version: string,
  *  htmlUrl: string,
@@ -37,7 +61,20 @@ const GITHUB_API_BASE = "https://api.github.com";
  *  publishedAt: string,
  *  prerelease: boolean,
  *  draft: boolean,
+ *  assetName: string,
+ *  downloadUrl: string,
  * }} SlqjAiGithubRelease
+ */
+
+/**
+ * @typedef {{
+ *  number: number,
+ *  title: string,
+ *  htmlUrl: string,
+ *  draft: boolean,
+ *  updatedAt: string,
+ *  headRepoFullName: string,
+ * }} SlqjAiGithubPullRequest
  */
 
 /**
@@ -129,7 +166,7 @@ export async function fetchLatestRelease(repo) {
  * 获取 releases 列表（GitHub API: releases）。
  *
  * @param {{owner:string, repo:string}} repo
- * @param {{perPage?:number, maxPages?:number, includePrerelease?:boolean}} [opts]
+ * @param {{perPage?:number, maxPages?:number, includePrerelease?:boolean, stopWhen?:(ctx:{page:number, releases:SlqjAiGithubRelease[]})=>boolean}} [opts]
  * @returns {Promise<{ok:true, releases:SlqjAiGithubRelease[]} | {ok:false, error:string, status?:number}>}
  */
 export async function fetchReleases(repo, opts) {
@@ -147,13 +184,12 @@ export async function fetchReleases(repo, opts) {
   if (perPage < 1) perPage = 1;
   if (perPage > 100) perPage = 100;
 
-  let maxPages = 5;
+  let maxPages = Number.POSITIVE_INFINITY;
   try {
     const n = Number(opts?.maxPages);
     if (Number.isFinite(n) && n > 0) maxPages = Math.floor(n);
   } catch (e) {}
-  if (maxPages < 1) maxPages = 1;
-  if (maxPages > 10) maxPages = 10;
+  const stopWhen = typeof opts?.stopWhen === "function" ? opts.stopWhen : null;
 
   /** @type {SlqjAiGithubRelease[]} */
   const releases = [];
@@ -195,11 +231,24 @@ export async function fetchReleases(repo, opts) {
         const body = typeof item?.body === "string" ? item.body : String(item?.body || "");
         const publishedAt = String(item?.published_at || "").trim();
         const version = normalizeTagToVersion(tagName);
+        const asset = pickZipAsset(item?.assets || []);
 
-        releases.push({ tagName, version, htmlUrl, title, body, publishedAt, prerelease, draft });
+        releases.push({
+          tagName,
+          version,
+          htmlUrl,
+          title,
+          body,
+          publishedAt,
+          prerelease,
+          draft,
+          assetName: asset?.name || "",
+          downloadUrl: asset?.apiUrl || asset?.downloadUrl || "",
+        });
       }
 
       // 若返回条数不足 perPage，通常表示已经到末页。
+      if (stopWhen && stopWhen({ page, releases })) break;
       if (list.length < perPage) break;
     }
 
@@ -207,6 +256,110 @@ export async function fetchReleases(repo, opts) {
   } catch (e) {
     return { ok: false, error: String(e && e.message ? e.message : e) || "unknown" };
   }
+}
+
+/**
+ * 获取开放 PR 列表（GitHub API: pulls）。
+ *
+ * @param {{owner:string, repo:string}} repo
+ * @param {{perPage?:number, maxPages?:number}} [opts]
+ * @returns {Promise<{ok:true, pullRequests:SlqjAiGithubPullRequest[]} | {ok:false, error:string, status?:number}>}
+ */
+export async function fetchOpenPullRequests(repo, opts) {
+  const owner = String(repo?.owner || "").trim();
+  const name = String(repo?.repo || "").trim();
+  if (!owner || !name) return { ok: false, error: "bad repo" };
+
+  let perPage = 30;
+  try {
+    const n = Number(opts?.perPage);
+    if (Number.isFinite(n) && n > 0) perPage = Math.floor(n);
+  } catch (e) {}
+  if (perPage < 1) perPage = 1;
+  if (perPage > 100) perPage = 100;
+
+  let maxPages = Number.POSITIVE_INFINITY;
+  try {
+    const n = Number(opts?.maxPages);
+    if (Number.isFinite(n) && n > 0) maxPages = Math.floor(n);
+  } catch (e) {}
+
+  /** @type {SlqjAiGithubPullRequest[]} */
+  const pullRequests = [];
+  const seenNumbers = new Set();
+
+  try {
+    if (typeof fetch !== "function") return { ok: false, error: "fetch unavailable" };
+
+    for (let page = 1; page <= maxPages; page++) {
+      const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/pulls?state=open&per_page=${perPage}&page=${page}`;
+
+      const resp = await fetch(url, {
+        method: "GET",
+        headers: {
+          Accept: "application/vnd.github+json",
+        },
+      });
+      if (!resp.ok) return { ok: false, error: `http ${resp.status}`, status: resp.status };
+
+      /** @type {GithubPullRequestItem[]|any} */
+      const list = await resp.json();
+      if (!Array.isArray(list)) return { ok: false, error: "bad response" };
+      if (!list.length) break;
+
+      for (const item of list) {
+        const number = Number(item?.number);
+        if (!Number.isFinite(number) || number <= 0) continue;
+        if (seenNumbers.has(number)) continue;
+        seenNumbers.add(number);
+
+        pullRequests.push({
+          number,
+          title: String(item?.title || "").trim(),
+          htmlUrl: String(item?.html_url || "").trim(),
+          draft: !!item?.draft,
+          updatedAt: String(item?.updated_at || "").trim(),
+          headRepoFullName: String(item?.head?.repo?.full_name || "").trim(),
+        });
+      }
+
+      if (list.length < perPage) break;
+    }
+
+    return { ok: true, pullRequests };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message ? e.message : e) || "unknown" };
+  }
+}
+
+/**
+ * @param {SlqjAiGithubRelease} release
+ * @param {{channel:"stable"|"pr", prNumber:string}} opts
+ * @returns {boolean}
+ */
+export function matchesReleaseForChannel(release, opts) {
+  if (!release || typeof release !== "object") return false;
+  const channel = normalizeUpdateChannel(opts?.channel);
+  const prNumber = normalizeUpdatePrNumber(opts?.prNumber);
+  if (channel !== UPDATE_CHANNEL_PR) return !release.prerelease;
+  if (!release.prerelease || !prNumber) return false;
+  const prMeta = extractPrBuildInfo(release.version || release.tagName || "");
+  return !!prMeta && prMeta.prNumber === prNumber;
+}
+
+/**
+ * @param {SlqjAiGithubRelease[]} releases
+ * @param {{channel:"stable"|"pr", prNumber:string}} opts
+ * @returns {SlqjAiGithubRelease|null}
+ */
+export function pickLatestReleaseForChannel(releases, opts) {
+  const list = Array.isArray(releases) ? releases : [];
+  const filtered = list
+    .filter((release) => matchesReleaseForChannel(release, opts))
+    .filter((release) => String(release?.assetName || "").trim() && String(release?.downloadUrl || "").trim());
+  if (!filtered.length) return null;
+  filtered.sort(compareReleasesDesc);
+  return filtered[0];
 }
 
 /**
@@ -253,4 +406,20 @@ async function fetchLatestReleaseFromList(repo) {
   } catch (e) {
     return { ok: false, error: String(e && e.message ? e.message : e) || "unknown" };
   }
+}
+
+/**
+ * @param {SlqjAiGithubRelease} a
+ * @param {SlqjAiGithubRelease} b
+ * @returns {number}
+ */
+function compareReleasesDesc(a, b) {
+  const cmp = compareSemver(String(a?.version || ""), String(b?.version || ""));
+  if (cmp !== null && cmp !== 0) return cmp === -1 ? 1 : -1;
+  const ta = Date.parse(String(a?.publishedAt || ""));
+  const tb = Date.parse(String(b?.publishedAt || ""));
+  const validA = Number.isFinite(ta);
+  const validB = Number.isFinite(tb);
+  if (validA && validB && ta !== tb) return tb - ta;
+  return String(b?.tagName || "").localeCompare(String(a?.tagName || ""));
 }

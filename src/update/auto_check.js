@@ -1,5 +1,10 @@
 import { checkForUpdate } from "./updater.js";
 import logManager from "../logger/manager.js";
+import {
+  SLQJ_AI_EXTENSION_BUILD_CHANNEL,
+  SLQJ_AI_EXTENSION_BUILD_PR_NUMBER,
+} from "../version.js";
+import { describeUpdateTarget, readUpdateTarget } from "./settings.js";
 
 const LAST_CHECK_KEY = "slqj_ai_update_last_check_ts";
 
@@ -39,8 +44,15 @@ export async function maybeAutoCheckForUpdates(opts) {
 
   const currentVersion = String(opts?.currentVersion || "").trim();
   if (!currentVersion) return null;
+  const { targetChannel, targetPrNumber } = readUpdateTarget(config, lib);
 
-  const result = await checkForUpdate({ currentVersion });
+  const result = await checkForUpdate({
+    currentVersion,
+    installedChannel: SLQJ_AI_EXTENSION_BUILD_CHANNEL,
+    installedPrNumber: SLQJ_AI_EXTENSION_BUILD_PR_NUMBER,
+    targetChannel,
+    targetPrNumber,
+  });
   try {
     if (game) {
       game.__slqjAiUpdateState = {
@@ -52,10 +64,10 @@ export async function maybeAutoCheckForUpdates(opts) {
 
   try {
     if (result && result.ok && result.updateAvailable) {
-      logger.warn(
-        "update",
-        `发现新版本：${result.currentVersion} -> ${result.latestVersion}（在扩展设置中点击“检查更新/更新”）`
-      );
+      const targetText = describeUpdateTarget(result.targetChannel, result.targetPrNumber);
+      const prefix = result.requiresReinstall ? "发现目标通道新包" : "发现新版本";
+      const actionText = result.requiresReinstall ? "需重新下载安装当前扩展" : "可在弹窗中下载并更新";
+      logger.warn("update", `${prefix}：${targetText}（${result.currentVersion} -> ${result.latestVersion}，${actionText}）`);
     }
   } catch (e) {}
 

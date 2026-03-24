@@ -24,13 +24,16 @@ jobs:
       - name: Compute ZIP name
         id: vars
         run: |
+          VERSION="${GITHUB_REF_NAME#v}"
           ZIP_BASENAME="身临其境的AI-${GITHUB_REF_NAME//\//-}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "build_tag=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
           echo "zip_basename=${ZIP_BASENAME}" >> $GITHUB_OUTPUT
           echo "zip_path=dist/${ZIP_BASENAME}.zip" >> $GITHUB_OUTPUT
 
       - name: Build ${{ steps.vars.outputs.zip_basename }}.zip
         run: |
-          python .github/scripts/build_release_zip.py --whitelist release-whitelist.txt --output "${{ steps.vars.outputs.zip_path }}" --root-name 身临其境的AI
+          python .github/scripts/build_release_zip.py --whitelist release-whitelist.txt --output "${{ steps.vars.outputs.zip_path }}" --root-name 身临其境的AI --version "${{ steps.vars.outputs.version }}" --build-channel stable --build-tag "${{ steps.vars.outputs.build_tag }}"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

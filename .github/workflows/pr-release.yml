@@ -1,0 +1,67 @@
+name: PR Test Release
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pr-release-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  build-prerelease:
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Compute PR release metadata
+        id: vars
+        shell: bash
+        run: |
+          BASE_VERSION="0.0.1"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          RUN_NUMBER="${{ github.run_number }}"
+          VERSION="${BASE_VERSION}-pr.${PR_NUMBER}.${RUN_NUMBER}"
+          TAG="v${VERSION}"
+          ZIP_BASENAME="身临其境的AI-pr-${PR_NUMBER}-run-${RUN_NUMBER}"
+          RELEASE_NAME="PR #${PR_NUMBER} Test Build ${RUN_NUMBER}"
+          echo "pr_number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "run_number=${RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "zip_basename=${ZIP_BASENAME}" >> "$GITHUB_OUTPUT"
+          echo "zip_path=dist/${ZIP_BASENAME}.zip" >> "$GITHUB_OUTPUT"
+          echo "release_name=${RELEASE_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Build ${{ steps.vars.outputs.zip_basename }}.zip
+        run: |
+          python .github/scripts/build_release_zip.py --whitelist release-whitelist.txt --output "${{ steps.vars.outputs.zip_path }}" --root-name 身临其境的AI --version "${{ steps.vars.outputs.version }}" --build-channel pr --build-pr-number "${{ steps.vars.outputs.pr_number }}" --build-tag "${{ steps.vars.outputs.tag }}"
+
+      - name: Create GitHub prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          target_commitish: ${{ github.event.pull_request.head.sha }}
+          name: ${{ steps.vars.outputs.release_name }}
+          prerelease: true
+          files: ${{ steps.vars.outputs.zip_path }}
+          fail_on_unmatched_files: true
+          body: |
+            Automated PR test build for #${{ steps.vars.outputs.pr_number }}.
+            Source commit: ${{ github.event.pull_request.head.sha }}

@@ -1,7 +1,18 @@
 import { createModalShell } from "../scripts_manager_modal.js";
 import { canWriteFiles } from "./node_env.js";
 import { checkForUpdate, downloadAndApplyUpdate, fetchReleaseNotesBetweenVersions } from "./updater.js";
-import { SLQJ_AI_UPDATE_REPO } from "../version.js";
+import {
+  SLQJ_AI_EXTENSION_BUILD_CHANNEL,
+  SLQJ_AI_EXTENSION_BUILD_PR_NUMBER,
+  SLQJ_AI_UPDATE_REPO,
+} from "../version.js";
+import {
+  describeUpdateTarget,
+  normalizeBuildChannel,
+  normalizeUpdatePrNumber,
+  readUpdateTarget,
+  UPDATE_CHANNEL_PR,
+} from "./settings.js";
 
 /**
  * @typedef {{version:string, tagName:string, title:string, body:string, htmlUrl:string, publishedAt:string}} SlqjAiReleaseNote
@@ -18,10 +29,13 @@ export async function openUpdateModal(opts) {
   const game = opts?.game;
   const currentVersion = String(opts?.currentVersion || "").trim();
   if (!baseUrl || !currentVersion) return;
+  const { targetChannel, targetPrNumber } = readUpdateTarget(opts?.config, opts?.lib);
+  const installedChannel = normalizeBuildChannel(SLQJ_AI_EXTENSION_BUILD_CHANNEL);
+  const installedPrNumber = normalizeUpdatePrNumber(SLQJ_AI_EXTENSION_BUILD_PR_NUMBER);
 
   const shell = createModalShell({
     title: "身临其境的AI-扩展更新",
-    subtitle: "从 GitHub Releases 检查新版本；下载并覆盖更新后需重启生效。",
+    subtitle: "从 GitHub Releases 检查 stable 正式版或指定 PR 测试版；切换通道会重新下载安装当前扩展。",
     ui: opts?.ui,
   });
 
@@ -83,7 +97,12 @@ export async function openUpdateModal(opts) {
       mergeGameUpdateState({ checkedAt: Date.now(), ...initialCheck });
     } catch (e) {}
     if (initialCheck.ok) {
-      shell.setStatus(initialCheck.updateAvailable ? "发现新版本：可点击“下载并更新”" : "已是最新版本");
+      if (!initialCheck.updateAvailable) shell.setStatus("已是目标通道最新版本");
+      else if (initialCheck.requiresReinstall) {
+        shell.setStatus(`发现目标版本：切换到 ${describeUpdateTarget(initialCheck.targetChannel, initialCheck.targetPrNumber)} 需重新下载安装`);
+      } else {
+        shell.setStatus("发现新版本：可点击“下载并更新”");
+      }
     } else {
       shell.setStatus("检查失败：" + String(initialCheck.error || "unknown"));
     }
@@ -148,7 +167,12 @@ export async function openUpdateModal(opts) {
         return;
       }
 
-      const key = `${String(r.currentVersion || "").trim()}->${String(r.latestTag || r.latestVersion || "").trim()}`;
+      const key = [
+        String(r.targetChannel || "").trim(),
+        String(r.targetPrNumber || "").trim(),
+        String(r.currentVersion || "").trim(),
+        String(r.latestTag || r.latestVersion || "").trim(),
+      ].join(":");
       if (!key) return;
 
       // 若 key 未变化且已有结果，则不重复请求。
@@ -171,7 +195,16 @@ export async function openUpdateModal(opts) {
       state.releaseNotes = null;
       render();
 
-      fetchReleaseNotesBetweenVersions({ currentVersion: r.currentVersion, latestVersion: r.latestVersion, latestTag: r.latestTag })
+      fetchReleaseNotesBetweenVersions({
+        currentVersion: r.currentVersion,
+        latestVersion: r.latestVersion,
+        latestTag: r.latestTag,
+        installedChannel: r.installedChannel,
+        installedPrNumber: r.installedPrNumber,
+        targetChannel: r.targetChannel,
+        targetPrNumber: r.targetPrNumber,
+        requiresReinstall: r.requiresReinstall,
+      })
         .then((res) => {
           state.notesLoading = false;
           if (!res || !res.ok) {
@@ -209,12 +242,20 @@ export async function openUpdateModal(opts) {
   const render = () => {
     info.innerHTML = "";
     appendLine(info, `当前版本：${currentVersion}`);
+    appendLine(info, `当前安装：${describeUpdateTarget(installedChannel, installedPrNumber)}`);
+    appendLine(info, `目标通道：${describeUpdateTarget(targetChannel, targetPrNumber)}`);
+    if (targetChannel === UPDATE_CHANNEL_PR && !targetPrNumber) {
+      appendLine(info, "目标PR：未填写，无法检查 PR 测试版更新");
+    }
 
     if (!state.lastCheck) appendLine(info, "最新版本：未检查");
     else if (!state.lastCheck.ok) appendLine(info, `最新版本：检查失败（${state.lastCheck.error || "unknown"}）`);
     else {
-      appendLine(info, `最新版本：${state.lastCheck.latestVersion}（tag: ${state.lastCheck.latestTag}）`);
+      appendLine(info, `目标版本：${state.lastCheck.latestVersion}（tag: ${state.lastCheck.latestTag}）`);
       appendLine(info, `资源文件：${state.lastCheck.assetName || "未知"}`);
+      if (state.lastCheck.requiresReinstall) {
+        appendLine(info, "更新方式：将重新下载安装目标通道版本");
+      }
     }
 
     try {
@@ -238,7 +279,7 @@ export async function openUpdateModal(opts) {
       header.style.fontWeight = "600";
       header.style.opacity = "0.95";
       header.textContent = state.lastCheck?.ok
-        ? `更新内容（${currentVersion} -> ${String(state.lastCheck.latestVersion || "").trim() || "latest"}）`
+        ? `更新内容（${describeUpdateTarget(targetChannel, targetPrNumber)} -> ${String(state.lastCheck.latestVersion || "").trim() || "latest"}）`
         : "更新内容";
       notesWrap.appendChild(header);
 
@@ -321,13 +362,25 @@ export async function openUpdateModal(opts) {
     state.checking = true;
     shell.setStatus("正在检查更新…");
     render();
-    const result = await checkForUpdate({ currentVersion });
+    const result = await checkForUpdate({
+      currentVersion,
+      installedChannel,
+      installedPrNumber,
+      targetChannel,
+      targetPrNumber,
+    });
     state.lastCheck = result;
     try {
       mergeGameUpdateState({ checkedAt: Date.now(), ...result });
     } catch (e) {}
     if (result.ok) {
-      shell.setStatus(result.updateAvailable ? "发现新版本：可点击“下载并更新”" : "已是最新版本");
+      if (!result.updateAvailable) {
+        shell.setStatus("已是目标通道最新版本");
+      } else if (result.requiresReinstall) {
+        shell.setStatus(`发现目标版本：切换到 ${describeUpdateTarget(result.targetChannel, result.targetPrNumber)} 需重新下载安装`);
+      } else {
+        shell.setStatus("发现新版本：可点击“下载并更新”");
+      }
     } else {
       shell.setStatus("检查失败：" + String(result.error || "unknown"));
     }
@@ -347,7 +400,9 @@ export async function openUpdateModal(opts) {
     }
     if (state.updating || state.checking) return;
 
-    const tip = `将下载并覆盖更新：${r.currentVersion} -> ${r.latestVersion}。完成后需要重启游戏/重载扩展生效。是否继续？`;
+    const tip = r.requiresReinstall
+      ? `将重新下载安装 ${describeUpdateTarget(r.targetChannel, r.targetPrNumber)}：${r.currentVersion} -> ${r.latestVersion}。完成后需要重启游戏/重载扩展生效。是否继续？`
+      : `将下载并覆盖更新：${r.currentVersion} -> ${r.latestVersion}。完成后需要重启游戏/重载扩展生效。是否继续？`;
     let confirmed = false;
     try {
       if (typeof confirm === "function") {

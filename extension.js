@@ -7,7 +7,13 @@ import { loadExtensionScripts } from "./src/scripts_loader.js";
 import { openScriptsPluginManagerModal } from "./src/scripts_manager_modal.js";
 import { installAiDecisionStatsUi } from "./src/decision_stats_ui.js";
 import { maybeAutoCheckForUpdates } from "./src/update/auto_check.js";
+import { openPrSelectorModal } from "./src/update/pr_selector_modal.js";
 import { openUpdateModal } from "./src/update/update_modal.js";
+import {
+	normalizeUpdateChannel,
+	normalizeUpdatePrNumber,
+	saveUpdateChannel,
+} from "./src/update/settings.js";
 import logManager from "./src/logger/manager.js";
 import { ConsoleLogger } from "./src/logger/console.js";
 import { SLQJ_AI_EXTENSION_VERSION, SLQJ_AI_EXTENSION_NAME } from "./src/version.js";
@@ -332,7 +338,7 @@ export default function(){
 	},
 	slqj_ai_update_auto_check:{
 		name:'启动时自动检查更新',
-		intro:'开启后会在启动时（节流）从 GitHub Releases 检查新版本；发现更新不会自动下载，需要在“检查更新/更新”里确认后才会覆盖更新（默认：开启）',
+		intro:'开启后会在启动时（节流）按当前更新通道从 GitHub Releases 检查新版本；发现更新不会自动下载，需要在“检查更新/更新”里确认后才会覆盖更新（默认：开启）',
 		init: lib.config.slqj_ai_update_auto_check===undefined?true:lib.config.slqj_ai_update_auto_check,
 		/**
 		 * @param {boolean} bool
@@ -343,9 +349,39 @@ export default function(){
 			game.saveConfig('slqj_ai_update_auto_check',bool);
 		},
 	},
+	slqj_ai_update_channel:{
+		name:'更新通道',
+		intro:'选择自动更新通道：stable 为正式版；PR 测试版请通过下面的“选择 PR 测试版”入口挑选。stable 与 PR 之间切换时，会强制重新下载安装当前扩展（默认：stable）',
+		init: normalizeUpdateChannel(lib.config.slqj_ai_update_channel),
+		item:{stable:'stable 正式版',pr:'PR 测试版'},
+		/**
+		 * @param {"stable"|"pr"|string} item
+		 * @returns {void}
+		 */
+		onclick:function(item){
+			saveUpdateChannel(game,item);
+		},
+	},
+	slqj_ai_update_pr_selector:{
+		name:'选择 PR 测试版',
+		intro:`打开可选 PR 列表并选择要跟踪的测试版（当前：${normalizeUpdatePrNumber(lib.config.slqj_ai_update_pr_number)?('PR测试版 #'+normalizeUpdatePrNumber(lib.config.slqj_ai_update_pr_number)):'未选择'}；选择后会自动检查更新，但不会自动下载安装）`,
+		clear:true,
+		/**
+		 * @returns {void}
+		 */
+		onclick:function(){
+			try{
+				openPrSelectorModal({ lib, game, ui, config: lib.config, currentVersion: SLQJ_AI_EXTENSION_VERSION }).catch(function(e){
+					logManager.error("update", "openPrSelectorModal failed", e);
+				});
+			}catch(e){
+				logManager.error("update", "openPrSelectorModal failed", e);
+			}
+		},
+	},
 	slqj_ai_update_check:{
 		name:'检查更新/更新',
-		intro:'打开更新弹窗：检查最新版本并可一键下载覆盖更新（自动更新仅在支持写文件的环境可用；更新后需重启生效）',
+		intro:'打开更新弹窗：按当前更新通道检查 stable/当前选中的 PR 测试版，并可一键下载覆盖更新（自动更新仅在支持写文件的环境可用；stable 与 PR 之间切换会强制重装；更新后需重启生效）',
 		clear:true,
 		/**
 		 * @returns {void}
@@ -404,7 +440,7 @@ export default function(){
 		'<li>可选：盲选手牌随机化（反全知）、评分噪声（仅冲动型）。</li>',
 		'<li>可选：<b>视觉调试(Debug)</b>（默认关闭）：出牌阶段高亮 AI 最可能出的牌并指向预测目标；弃牌阶段高亮建议弃置/留下。</li>',
 		'<li>支持 <b>scripts</b> 脚本插件：加载扩展目录 <b>scripts/</b> 下一层脚本，并可在“脚本插件管理”里启用/禁用与调整顺序。</li>',
-		'<li>支持 <b>检查更新/更新</b>：从 GitHub Releases 检查新版本；在支持写文件的环境可一键下载并覆盖更新（需重启生效）。</li>',
+		'<li>支持 <b>检查更新/更新</b>：可跟踪 stable 正式版或从可选列表选择 PR 测试版；stable 与 PR 之间切换、或切到不同 PR 时，会重新下载安装当前扩展（需重启生效）。</li>',
 		'</ul>',
 
 		'<div style="margin:10px"><b>生效范围（重要）</b></div>',
