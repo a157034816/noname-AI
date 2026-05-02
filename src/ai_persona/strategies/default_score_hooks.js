@@ -2362,7 +2362,12 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				if (att < -3.5) return;
 
 				const id = String(player.identity || "");
-				const idScale = id === "fan" ? 1.1 : id === "zhong" || id === "mingzhong" || id === "zhu" ? 1 : 0.95;
+				// 修正“远位菜刀大概率忠”的经验假设：
+				// - 主公首轮信息最少，不应基于该假设压制其盲狙（反贼也可能是菜刀位），因此主公不施加惩罚
+				// - 忠臣仍可参考该经验，但考虑到主公视角更应保守，因此忠臣的惩罚减半
+				// - 反贼/内奸保持原先权重不变
+				if (id === "zhu" || player.isZhu) return;
+				const idScale = id === "fan" ? 1.1 : id === "zhong" || id === "mingzhong" ? 0.5 : 0.95;
 				const dScale = clampNumber((dist - 1) / 3, 0, 1);
 				const penalty = (0.65 + 0.85 * dScale) * idScale;
 				ctx.score -= penalty;
