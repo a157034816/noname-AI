@@ -56,6 +56,46 @@ function clampNumber(x, lo, hi) {
 }
 
 /**
+ * 判断当前是否为盲选手牌场景（反全知）。
+ * 条件与 selector_patch.js 的 shouldRandomizeBlindHandcard 保持一致。
+ *
+ * @param {{event:any, player:any, candidate:any}} ctx
+ * @param {*} game
+ * @param {*} get
+ * @returns {boolean}
+ */
+function isBlindHandcardSelection(ctx, game, get) {
+	const cfg = game?.__slqjAiPersona?.cfg;
+	if (!cfg?.blindHandcardRandom) return false;
+
+	const event = ctx?.event;
+	if (!event) return false;
+	if (event.name !== "choosePlayerCard" && event.name !== "discardPlayerCard") return false;
+	if (typeof event.position !== "string" || !event.position.includes("h")) return false;
+	if (event.visible === true) return false;
+
+	const target = event.target;
+	if (typeof target?.isUnderControl === "function" && target.isUnderControl(true)) return false;
+
+	const player = ctx?.player;
+	if (player && typeof player.hasSkillTag === "function") {
+		try {
+			if (player.hasSkillTag("viewHandcard", null, target, true)) return false;
+		} catch (e) {}
+	}
+
+	const link = ctx?.candidate?.link;
+	if (!link) return false;
+	if (get?.is && typeof get.is.shownCard === "function") {
+		try {
+			if (get.is.shownCard(link)) return false;
+		} catch (e) {}
+	}
+
+	return true;
+}
+
+/**
  * 安全读取态度值（异常/缺失时回退 0）。
  *
  * @param {*} get
@@ -4259,8 +4299,9 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 						return;
 					}
 
-					// 手牌：若明确可见桃（或选牌可见），拆掉桃通常更关键
-					if (pos === "h") {
+					// 手牌：若明确可见桃（或选牌可见），拆掉桃通常更关键。
+					// 盲选手牌场景跳过（反全知）：此时底分已被随机化，不应再用全知视角读牌名加分。
+					if (pos === "h" && !isBlindHandcardSelection(ctx, game, get)) {
 						const name = String(link?.name || "");
 						if (att < -0.6 && name === "tao") ctx.score += 0.55;
 					}
