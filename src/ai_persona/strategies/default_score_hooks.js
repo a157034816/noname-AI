@@ -16,6 +16,7 @@ import {
 	shouldUseOffensiveGroupTrick,
 	shouldUseBeneficialGroupTrick,
 } from "../lib/identity_utils.js";
+import { guessIdentityFor, explainGuessIdentityFor } from "../guess_identity.js";
 import { STORAGE_KEY } from "../lib/constants.js";
 import { getPid } from "../lib/utils.js";
 import {
@@ -1587,6 +1588,106 @@ export function shouldForbidRescueRecentAttackInChooseBool(chooseBoolEvent, play
 		if (getPid(t) === recent.targetPid) return true;
 	}
 	return false;
+}
+
+/**
+ * 判断一次 chooseBool（通常来自 chooseUseTarget 的“是否使用”询问）是否需要触发
+ * 「不救已暴露敌人」硬门槛。
+ *
+ * 背景：
+ * - 濒死救援会先询问“是否出桃”（chooseBool），随后才进入目标确认/用牌
+ * - 若仅在 chooseTarget 阶段扣分，会出现“先答应出一桃，但不足以救回”的浪费
+ *
+ * 规则：
+ * - 仅身份局生效
+ * - 不影响自救、救主公
+ * - 仅在“救援/回复”语义且目标确为濒死者时生效（避免误伤其他 chooseBool 确认）
+ *
+ * @param {*} chooseBoolEvent
+ * @param {*} player
+ * @param {*} game
+ * @param {*} get
+ * @returns {boolean}
+ */
+export function shouldForbidRescueExposedEnemyInChooseBool(chooseBoolEvent, player, game, get) {
+	if (!chooseBoolEvent || !player || !game) return false;
+	if (get?.mode?.() !== "identity") return false;
+
+	// 仅 gate chooseUseTarget -> chooseBool 的救援询问（典型：濒死用桃）
+	let useEvt = null;
+	try {
+		useEvt = typeof chooseBoolEvent.getParent === "function" ? chooseBoolEvent.getParent("chooseUseTarget") : null;
+	} catch (e) {
+		useEvt = null;
+	}
+	if (!useEvt) return false;
+
+	// 只对“救援/回复”语义生效
+	if (!isRescueLikeChooseTargetEvent(useEvt, player, get)) return false;
+
+	// 在 chooseUseTarget 中，目标可能写入 targets2（筛选后的候选）或 targets（默认全体）
+	const candidates =
+		Array.isArray(useEvt.targets2) && useEvt.targets2.length ? useEvt.targets2 : Array.isArray(useEvt.targets) ? useEvt.targets : [];
+	if (!candidates.length) return false;
+
+	// 仅对“濒死”目标生效：避免把常规回复/加血也一刀切成“不救敌人”
+	/** @type {any[]} */
+	const dyingTargets = [];
+	for (const t of candidates) {
+		if (!t) continue;
+		let dying = false;
+		try {
+			dying = (typeof t.isDying === "function" && t.isDying()) || (typeof t.hp === "number" && t.hp <= 0);
+		} catch (e) {
+			dying = typeof t.hp === "number" && t.hp <= 0;
+		}
+		if (dying) dyingTargets.push(t);
+	}
+	if (!dyingTargets.length) return false;
+
+	let seenEnemy = false;
+	for (const target of dyingTargets) {
+		if (!target) continue;
+
+		// 明确例外：不影响自救/救主公
+		if (target === player) return false;
+		if (game?.zhu && target === game.zhu) return false;
+
+		const shown = target.ai && typeof target.ai.shown === "number" ? target.ai.shown : 0;
+		const g = explainGuessIdentityFor(player, target, game);
+		const gid = String(g?.identity || "unknown");
+		const conf = typeof g?.confidence === "number" ? g.confidence : 0;
+
+		// 友方（主忠/明忠）：置信度足够且软暴露达标时，不阻止救援
+		if (["zhu", "zhong", "mingzhong"].includes(gid) && conf >= 0.55 && shown >= 0.7) return false;
+
+		// 已明置：态度为正视为友方，不阻止
+		if (target.identityShown && safeAttitude(get, player, target) > 0) return false;
+
+		// 敌方：高置信反贼
+		if (gid === "fan" && conf >= 0.55) {
+			seenEnemy = true;
+			continue;
+		}
+
+		// 敌方：高软暴露且猜测为反贼（用于解释器未给出 fan 的兜底）
+		if (shown >= 0.7) {
+			const g2 = guessIdentityFor(player, target, game);
+			const gid2 = String(g2?.identity || "unknown");
+			if (gid2 === "fan") {
+				seenEnemy = true;
+				continue;
+			}
+		}
+
+		// 敌意：态度显著为负（仅当信息已较明确时，避免一张桃救“显著敌对”的目标）
+		if (safeAttitude(get, player, target) < -0.3) {
+			seenEnemy = true;
+			continue;
+		}
+	}
+
+	return seenEnemy;
 }
 
 /**

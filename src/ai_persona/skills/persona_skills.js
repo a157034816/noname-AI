@@ -191,6 +191,32 @@ export function installPersonaSkills({ lib, game, get, _status }) {
 	});
 	game.addGlobalSkill("slqj_ai_no_rescue_recent_attack_chooseBool");
 
+	// 行为规则：「已暴露的敌人我不救」（chooseUseTarget -> chooseBool 分支兜底）
+	// - 典型场景：敌方 -2HP 濒死需两桃时，避免“先出一桃但仍未脱离濒死”导致的资源浪费
+	ensureSkill(lib, "slqj_ai_no_rescue_exposed_enemy_chooseBool", {
+		trigger: { player: "chooseBoolBegin" },
+		forced: true,
+		silent: true,
+		popup: false,
+		priority: Infinity,
+		filter(event, player) {
+			if (_status.connectMode) return false;
+			if (!event || !player) return false;
+			if (!game.__slqjAiPersona?.isLocalAIPlayer?.(player, game, _status)) return false;
+			const st = player?.storage?.[STORAGE_KEY];
+			if (!st?.persona) return false;
+			return !!game.__slqjAiPersona?.shouldForbidRescueExposedEnemyInChooseBool?.(event, player, game, get);
+		},
+		content() {
+			// 强制不救：覆盖本次 chooseBool 的默认 choice/ai
+			trigger.choice = false;
+			trigger.ai = function () {
+				return false;
+			};
+		},
+	});
+	game.addGlobalSkill("slqj_ai_no_rescue_exposed_enemy_chooseBool");
+
 	// 行为规则：主公首轮全暗时，群攻可直接使用（用于试探信息）
 	ensureSkill(lib, "slqj_ai_zhu_round1_aoe_probe_chooseBool", {
 		trigger: { player: "chooseBoolBegin" },
