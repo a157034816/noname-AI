@@ -2,9 +2,15 @@ import { STORAGE_KEY } from "./lib/constants.js";
 import { clamp, getPid, isLocalAIPlayer } from "./lib/utils.js";
 
 const SIGNAL_THRESHOLD = 1.2;
-const SOFT_EXPOSE_THRESHOLD = 0.7;
+const SOFT_EXPOSE_THRESHOLD = 0.5;
 const FAN_CANDIDATE_CONFIDENCE = 0.65;
 const SOFT_ASSIGN_CONFIDENCE = 0.6;
+// 二元阵营推断：用于“推算反贼”的兜底置信度（刻意保持中等，避免误判时过度自信）
+const CAMP_BINARY_FAN_CONFIDENCE = 0.55;
+// 二元阵营推断：将目标纳入“主公阵营”的共识置信度门槛
+const CAMP_BINARY_LORD_CONFIDENCE = 0.68;
+// 二元阵营推断：当对某人“强烈记仇”时，允许暂时推翻其“主公阵营”标记（更偏向按敌方处理）
+const CAMP_BINARY_GRUDGE_OVERRIDE_BOOST = 0.6;
 
 /**
  * @typedef {import("./lib/jsdoc_types.js").IdentityId} IdentityId
@@ -239,6 +245,85 @@ function getSoftAssignedIdentity(target, game) {
 }
 
 /**
+ * 计算“二元阵营推断”的启用状态（主公阵营 vs 敌方阵营）。
+ *
+ * 设计目标：
+ * - 这是一个“推算反贼身份”的辅助策略，只负责在信息不足时把目标推向 `fan`，不反向推断 `zhu/zhong/nei`
+ * - 触发门槛较高：必须确保场上所有存活角色都已“软暴露”或已亮身份，避免早期胡乱二分阵营
+ * - 结果是动态的：每次调用都会重新计算，后续证据积累后可自然推翻（不会写死状态）
+ *
+ * 触发条件（对局层面）：
+ * - 场上所有存活角色：要么 `identityShown === true`，要么 `shown >= SOFT_EXPOSE_THRESHOLD`
+ *
+ * 阵营定义：
+ * - 主公阵营(lord camp)：`zhu/zhong/nei`（含公开信息可确定者，或 AI 共识高置信推断者）
+ * - 敌方阵营(enemy camp)：存活但不在主公阵营中的其他人（只作为“排除法推 fan”的集合）
+ *
+ * 注意：
+ * - 本函数不会读取真实身份；只使用 `resolveBaseIdentity` 能看到的公开信息与 AI 共识推断结果
+ *
+ * @param {*} game
+ * @returns {{enabled:boolean, lordCamp:Set<string>, enemyCamp:Set<string>}}
+ */
+function computeCampBinaryState(game) {
+  const empty = { enabled: false, lordCamp: new Set(), enemyCamp: new Set() };
+  if (!game) return empty;
+
+  // 没有可用观察者，就没有“AI 共识”的基础，直接禁用
+  const observers = getObservers(game);
+  if (!observers.length) return empty;
+
+  const alivePlayers = getAllPlayers(game).filter(isAlive);
+  if (!alivePlayers.length) return empty;
+
+  // 触发条件：所有存活角色必须"已亮身份"或达到"软暴露阈值"
+  for (const p of alivePlayers) {
+    if (!p) continue;
+    if (p.identityShown) continue;
+    if (getAiShown(p) >= SOFT_EXPOSE_THRESHOLD) continue;
+    return empty;
+  }
+
+  /** @type {Set<string>} */
+  const lordCamp = new Set();
+  /** @type {Set<string>} */
+  const enemyCamp = new Set();
+
+  // 第一步：确定主公阵营成员（只挑“足够确信”的 zhu/zhong/nei）
+  for (const p of alivePlayers) {
+    if (!p) continue;
+    const pid = String(getPid(p));
+
+    // 公开信息：主公/已亮身份
+    const fixed = resolveBaseIdentity(p, game);
+    if (fixed) {
+      const id = String(fixed.identity || "unknown");
+      if (["zhu", "zhong", "mingzhong", "nei"].includes(id)) {
+        lordCamp.add(pid);
+      }
+      continue;
+    }
+
+    // 共识推断：禁用 softAssign，避免与其它启发式互相耦合
+    const raw = guessIdentityConsensus(p, game, { disableSoftAssign: true });
+    const id = String(raw?.identity || "unknown");
+    const conf = typeof raw?.confidence === "number" ? raw.confidence : 0;
+    if (["zhu", "zhong", "nei"].includes(id) && conf >= CAMP_BINARY_LORD_CONFIDENCE) {
+      lordCamp.add(pid);
+    }
+  }
+
+  // 第二步：排除法得到敌方阵营（存活但不在主公阵营内的人）
+  for (const p of alivePlayers) {
+    if (!p) continue;
+    const pid = String(getPid(p));
+    if (!lordCamp.has(pid)) enemyCamp.add(pid);
+  }
+
+  return { enabled: true, lordCamp, enemyCamp };
+}
+
+/**
  * 将 evidence 转换为“主公阵营轴”（+更像忠，-更像反）。
  *
  * 注意：evidence 是“对观察者有利/不利”的主观证据：
@@ -377,6 +462,51 @@ function guessIdentityForDetailed(observer, target, game, opts) {
             softAssign: soft.detail,
           },
         };
+      }
+
+      // 二元阵营推断：当场上所有存活角色都已“软暴露/亮身份”时，用“主公阵营排除法”兜底推算反贼。
+      // 约束：
+      // - 优先级低于强信号（这里只在 absEffective 不足时进入）
+      // - 只会推 `fan`，不会反推 `zhu/zhong/nei`，避免污染其它身份推断
+      // - 结果可被后续证据自然推翻（只是一条 reason 分支）
+      const camp = computeCampBinaryState(game);
+      if (camp.enabled) {
+        const targetPid = String(getPid(target));
+        const grudgeOverride = getGrudgeBoost(grudge) >= CAMP_BINARY_GRUDGE_OVERRIDE_BOOST;
+        const inLordCamp = camp.lordCamp.has(targetPid);
+        if (!inLordCamp || grudgeOverride) {
+          return {
+            identity: "fan",
+            confidence: CAMP_BINARY_FAN_CONFIDENCE,
+            reason: "camp_binary_exclusion",
+            detail: {
+              s,
+              evidence,
+              evidenceAxis,
+              axis,
+              axisSource,
+              absAxis,
+              absEffective,
+              grudge,
+              grudgeBoost,
+              help,
+              harm,
+              threshold: SIGNAL_THRESHOLD,
+              shown,
+              weight,
+              campBinary: {
+                enabled: camp.enabled,
+                lordCampSize: camp.lordCamp.size,
+                enemyCampSize: camp.enemyCamp.size,
+                lordConfidence: CAMP_BINARY_LORD_CONFIDENCE,
+                fanConfidence: CAMP_BINARY_FAN_CONFIDENCE,
+                grudgeOverride,
+                grudgeOverrideBoost: CAMP_BINARY_GRUDGE_OVERRIDE_BOOST,
+                softExposeThreshold: SOFT_EXPOSE_THRESHOLD,
+              },
+            },
+          };
+        }
       }
     }
     return {
