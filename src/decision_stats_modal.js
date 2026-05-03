@@ -9,7 +9,7 @@ const ROOT_ID = "slqj-ai-decision-stats-root";
  * - chooseTarget：选目标
  * - chooseButton：选按钮
  *
- * @typedef {"all"|"chooseCard"|"chooseTarget"|"chooseButton"} DecisionStatsKindFilter
+ * @typedef {"all"|"chooseCard"|"chooseTarget"|"chooseButton"|"chooseToRespond"} DecisionStatsKindFilter
  */
 
 /**
@@ -94,10 +94,11 @@ function pickCounters(statsByKind, filter) {
   const a = st.chooseCard || zero;
   const b = st.chooseTarget || zero;
   const c = st.chooseButton || zero;
+  const d = st.chooseToRespond || zero;
   return {
-    cover: (a.cover || 0) + (b.cover || 0) + (c.cover || 0),
-    hit: (a.hit || 0) + (b.hit || 0) + (c.hit || 0),
-    pick: (a.pick || 0) + (b.pick || 0) + (c.pick || 0),
+    cover: (a.cover || 0) + (b.cover || 0) + (c.cover || 0) + (d.cover || 0),
+    hit: (a.hit || 0) + (b.hit || 0) + (c.hit || 0) + (d.hit || 0),
+    pick: (a.pick || 0) + (b.pick || 0) + (c.pick || 0) + (d.pick || 0),
   };
 }
 
@@ -111,7 +112,7 @@ function pickCounters(statsByKind, filter) {
 function pickDenom(totalsByKind, filter) {
   const t = totalsByKind && typeof totalsByKind === "object" ? totalsByKind : {};
   if (filter !== "all") return Number(t[filter] || 0);
-  return Number(t.chooseCard || 0) + Number(t.chooseTarget || 0) + Number(t.chooseButton || 0);
+  return Number(t.chooseCard || 0) + Number(t.chooseTarget || 0) + Number(t.chooseButton || 0) + Number(t.chooseToRespond || 0);
 }
 
 /**
@@ -349,7 +350,7 @@ export function openAiDecisionStatsModal(opts) {
       const tag = document.createElement("div");
       tag.className = "slqj-ai-subline";
       tag.style.opacity = ".9";
-      tag.textContent = filter === "all" ? "全部" : filter === "chooseCard" ? "选牌" : filter === "chooseTarget" ? "选目标" : "选按钮";
+      tag.textContent = filter === "all" ? "全部" : filter === "chooseCard" ? "选牌" : filter === "chooseTarget" ? "选目标" : filter === "chooseToRespond" ? "响应" : "选按钮";
       right.appendChild(tag);
 
       row.appendChild(left);

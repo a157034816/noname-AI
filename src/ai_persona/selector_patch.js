@@ -146,7 +146,7 @@ function pettyBias(player, target, get) {
  * @param {*} get
  * @param {*} game
  * @param {*} _status
- * @param {"chooseCard"|"chooseTarget"|"chooseButton"|string} kind
+ * @param {"chooseCard"|"chooseTarget"|"chooseButton"|"chooseToRespond"|string} kind
  * @param {{decisionStats?: any, session?: any}=} track 决策统计追踪上下文（用于覆盖/命中/选用率）
  * @returns {(candidate:any, all:any)=>number}
  */
@@ -260,11 +260,13 @@ export function installSelectorPatch({ ai, get, game, _status }) {
 			if (!isLocalAIPlayer(player, game, _status) || !getPersona(player)) {
 				return original.chooseCard(check);
 			}
+			// 检测是否为 chooseToRespond 上下文（如无懈可击响应），以便 hook 按 kind 区分
+			const eventKind = _status.event?.name === "chooseToRespond" ? "chooseToRespond" : "chooseCard";
 			const hooksAny = game?.__slqjAiPersona?.hooks || game?.slqjAiHooks;
 			const decisionStats = hooksAny && typeof hooksAny === "object" ? hooksAny.__slqjAiDecisionStats : null;
-			const session = decisionStats && typeof decisionStats.beginSession === "function" ? decisionStats.beginSession({ kind: "chooseCard" }) : null;
+			const session = decisionStats && typeof decisionStats.beginSession === "function" ? decisionStats.beginSession({ kind: eventKind }) : null;
 			try {
-				return original.chooseCard(wrapCheck(player, check, get, game, _status, "chooseCard", { decisionStats, session }));
+				return original.chooseCard(wrapCheck(player, check, get, game, _status, eventKind, { decisionStats, session }));
 			} finally {
 				try {
 					if (session && decisionStats && typeof decisionStats.endSession === "function") decisionStats.endSession(session);
@@ -279,11 +281,13 @@ export function installSelectorPatch({ ai, get, game, _status }) {
 			if (!isLocalAIPlayer(player, game, _status) || !getPersona(player)) {
 				return original.chooseTarget(check);
 			}
+			// 检测是否为 chooseToRespond 上下文（如无懈可击响应），以便 hook 按 kind 区分
+			const eventKind = _status.event?.name === "chooseToRespond" ? "chooseToRespond" : "chooseTarget";
 			const hooksAny = game?.__slqjAiPersona?.hooks || game?.slqjAiHooks;
 			const decisionStats = hooksAny && typeof hooksAny === "object" ? hooksAny.__slqjAiDecisionStats : null;
-			const session = decisionStats && typeof decisionStats.beginSession === "function" ? decisionStats.beginSession({ kind: "chooseTarget" }) : null;
+			const session = decisionStats && typeof decisionStats.beginSession === "function" ? decisionStats.beginSession({ kind: eventKind }) : null;
 			try {
-				return original.chooseTarget(wrapCheck(player, check, get, game, _status, "chooseTarget", { decisionStats, session }));
+				return original.chooseTarget(wrapCheck(player, check, get, game, _status, eventKind, { decisionStats, session }));
 			} finally {
 				try {
 					if (session && decisionStats && typeof decisionStats.endSession === "function") decisionStats.endSession(session);

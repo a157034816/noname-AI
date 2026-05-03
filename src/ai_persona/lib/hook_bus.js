@@ -106,7 +106,7 @@ function createDecisionStatsStore() {
   /** @type {Map<number, SlqjAiDecisionCountersByKind>} */
   const statsById = new Map();
   /** @type {Record<string, number>} */
-  const totalsByKind = { chooseCard: 0, chooseTarget: 0, chooseButton: 0 };
+  const totalsByKind = { chooseCard: 0, chooseTarget: 0, chooseButton: 0, chooseToRespond: 0 };
   /** @type {SlqjAiDecisionSession[]} */
   const sessionStack = [];
 
@@ -133,6 +133,7 @@ function createDecisionStatsStore() {
       chooseCard: createEmptyCounters(),
       chooseTarget: createEmptyCounters(),
       chooseButton: createEmptyCounters(),
+      chooseToRespond: createEmptyCounters(),
     };
   }
 
