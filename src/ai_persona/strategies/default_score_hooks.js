@@ -56,6 +56,46 @@ function clampNumber(x, lo, hi) {
 }
 
 /**
+ * 判断当前是否为盲选手牌场景（反全知）。
+ * 条件与 selector_patch.js 的 shouldRandomizeBlindHandcard 保持一致。
+ *
+ * @param {{event:any, player:any, candidate:any}} ctx
+ * @param {*} game
+ * @param {*} get
+ * @returns {boolean}
+ */
+function isBlindHandcardSelection(ctx, game, get) {
+	const cfg = game?.__slqjAiPersona?.cfg;
+	if (!cfg?.blindHandcardRandom) return false;
+
+	const event = ctx?.event;
+	if (!event) return false;
+	if (event.name !== "choosePlayerCard" && event.name !== "discardPlayerCard") return false;
+	if (typeof event.position !== "string" || !event.position.includes("h")) return false;
+	if (event.visible === true) return false;
+
+	const target = event.target;
+	if (typeof target?.isUnderControl === "function" && target.isUnderControl(true)) return false;
+
+	const player = ctx?.player;
+	if (player && typeof player.hasSkillTag === "function") {
+		try {
+			if (player.hasSkillTag("viewHandcard", null, target, true)) return false;
+		} catch (e) {}
+	}
+
+	const link = ctx?.candidate?.link;
+	if (!link) return false;
+	if (get?.is && typeof get.is.shownCard === "function") {
+		try {
+			if (get.is.shownCard(link)) return false;
+		} catch (e) {}
+	}
+
+	return true;
+}
+
+/**
  * 安全读取态度值（异常/缺失时回退 0）。
  *
  * @param {*} get
@@ -2362,7 +2402,12 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				if (att < -3.5) return;
 
 				const id = String(player.identity || "");
-				const idScale = id === "fan" ? 1.1 : id === "zhong" || id === "mingzhong" || id === "zhu" ? 1 : 0.95;
+				// 修正“远位菜刀大概率忠”的经验假设：
+				// - 主公首轮信息最少，不应基于该假设压制其盲狙（反贼也可能是菜刀位），因此主公不施加惩罚
+				// - 忠臣仍可参考该经验，但考虑到主公视角更应保守，因此忠臣的惩罚减半
+				// - 反贼/内奸保持原先权重不变
+				if (id === "zhu" || player.isZhu) return;
+				const idScale = id === "fan" ? 1.1 : id === "zhong" || id === "mingzhong" ? 0.5 : 0.95;
 				const dScale = clampNumber((dist - 1) / 3, 0, 1);
 				const penalty = (0.65 + 0.85 * dScale) * idScale;
 				ctx.score -= penalty;
@@ -4254,8 +4299,9 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 						return;
 					}
 
-					// 手牌：若明确可见桃（或选牌可见），拆掉桃通常更关键
-					if (pos === "h") {
+					// 手牌：若明确可见桃（或选牌可见），拆掉桃通常更关键。
+					// 盲选手牌场景跳过（反全知）：此时底分已被随机化，不应再用全知视角读牌名加分。
+					if (pos === "h" && !isBlindHandcardSelection(ctx, game, get)) {
 						const name = String(link?.name || "");
 						if (att < -0.6 && name === "tao") ctx.score += 0.55;
 					}
