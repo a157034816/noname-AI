@@ -4593,4 +4593,34 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 			{ priority: 5, title: "默认策略：群体有益锦囊使用门槛" }
 		);
 	}
+
+	// 行为规则：木牛流马只能传给双向好感度 >= 3 的友方目标
+	// 说明：
+	// - 原版 extra.js 的 muniu_skill_backup.content 在筛选 choice 时已做态度过滤，
+	//   但 chooseTarget 的 filterTarget 未同步过滤，且 slqj_ai_score 链上其他 hook
+	//   可能在 final 阶段将敌对目标分数抬回正值，导致木牛流马误传给敌人。
+	// - 本 hook 作为安全兜底，在 final 阶段（priority=0 最后执行）对 muniu 选目标
+	//   强制校验双向好感度：不满足则直接将分数压至 -9999。
+	if (!game.__slqjAiPersona._muniuTargetGuardInstalled) {
+		game.__slqjAiPersona._muniuTargetGuardInstalled = true;
+		hooks.on(
+			"slqj_ai_score",
+			ctx => {
+				if (!ctx || ctx.kind !== "chooseTarget" || ctx.stage !== "final") return;
+				const event = ctx.event;
+				if (!event || !event.muniu) return;
+				if (typeof get?.itemtype === "function" && get.itemtype(ctx.candidate) !== "player") return;
+				const player = ctx.player;
+				const target = ctx.candidate;
+				if (!player || !target || player === target) return;
+				// 双向好感度校验：必须双方态度均 >= 3 才允许传木牛流马
+				const att1 = safeAttitude(get, player, target);
+				const att2 = safeAttitude(get, target, player);
+				if (att1 >= 3 && att2 >= 3) return;
+				// 不满足友方条件，强制压到极低分，确保不会被选中
+				ctx.score = -9999;
+			},
+			{ priority: 0, title: "行为规则：木牛流马禁止传给敌对目标" }
+		);
+	}
 }
