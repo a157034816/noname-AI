@@ -4015,6 +4015,12 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 							let delta = -1.1;
 							const t = firstTarget;
 							const att = t ? safeAttitude(get, player, t) : 0;
+							// 如果拆牌使用者是已知盟友，不无懈（队友拆我是在帮我）
+							if (source && isExposedFriendlyTarget(player, source, game, get)) {
+								ctx.score -= 9999;
+								return;
+							}
+							
 							if (t && att > 0.6) {
 								const j = safeGetCards(t, "j");
 								const e = safeGetCards(t, "e");
