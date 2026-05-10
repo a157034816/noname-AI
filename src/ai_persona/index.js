@@ -37,6 +37,7 @@ import {
 import {
   installDefaultScoreHooks,
   shouldForbidRescueRecentAttackInChooseBool,
+  shouldForbidRescueExposedEnemyInChooseBool,
   shouldForceZhuRound1AoeProbeInChooseBool,
 } from "./strategies/default_score_hooks.js";
 import { installChooseCharacterBias } from "./strategies/choose_character_bias.js";
@@ -216,6 +217,7 @@ export function installPersonaSystem({ lib, game, get, ai, _status, config }) {
 	game.__slqjAiPersona.onRecentAttackMark = onRecentAttackMark;
 	game.__slqjAiPersona.onRecentAttackClear = onRecentAttackClear;
 	game.__slqjAiPersona.shouldForbidRescueRecentAttackInChooseBool = shouldForbidRescueRecentAttackInChooseBool;
+	game.__slqjAiPersona.shouldForbidRescueExposedEnemyInChooseBool = shouldForbidRescueExposedEnemyInChooseBool;
 	game.__slqjAiPersona.shouldForceZhuRound1AoeProbeInChooseBool = shouldForceZhuRound1AoeProbeInChooseBool;
 	game.__slqjAiPersona.onDamageEndRage = onDamageEndRage;
 	game.__slqjAiPersona.onRecoverEndRage = onRecoverEndRage;
