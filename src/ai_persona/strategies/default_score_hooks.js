@@ -229,13 +229,17 @@ function safeGetWeaponCard(player, get) {
 }
 
 /**
- * 识别目标是否装备了“仁王盾/仁王金刚盾”（装备名：renwang / rewrite_renwang）。
+ * 识别目标是否装备了会使部分【杀】无效的防具。
+ *
+ * 说明：
+ * - `unequip2` 表示目标防具被无效化，此时不再把装备区防具视为阻挡来源。
+ * - 当前仅覆盖已知稳定规则：仁王盾/仁王金刚盾、藤甲/重铸藤甲。
  *
  * @param {*} target
  * @param {*} get
- * @returns {("renwang"|"rewrite_renwang")|null}
+ * @returns {("renwang"|"rewrite_renwang"|"tengjia"|"rewrite_tengjia")|null}
  */
-function getRenwangShieldType(target, get) {
+function getShaIneffectiveArmorType(target, get) {
 	if (!target) return null;
 	try {
 		if (typeof target?.hasSkillTag === "function" && target.hasSkillTag("unequip2")) return null;
@@ -246,8 +250,21 @@ function getRenwangShieldType(target, get) {
 	const equips = safeGetCards(target, "e");
 	for (const c of equips) {
 		const name = String(c?.name || "");
-		if (name === "renwang" || name === "rewrite_renwang") return /** @type {any} */ (name);
+		if (name === "renwang" || name === "rewrite_renwang" || name === "tengjia" || name === "rewrite_tengjia") return /** @type {any} */ (name);
 	}
+	return null;
+}
+
+/**
+ * 识别目标是否装备了“仁王盾/仁王金刚盾”（装备名：renwang / rewrite_renwang）。
+ *
+ * @param {*} target
+ * @param {*} get
+ * @returns {("renwang"|"rewrite_renwang")|null}
+ */
+function getRenwangShieldType(target, get) {
+	const armorType = getShaIneffectiveArmorType(target, get);
+	if (armorType === "renwang" || armorType === "rewrite_renwang") return armorType;
 	return null;
 }
 
@@ -276,11 +293,72 @@ function isShaIneffectiveAgainstRenwang(shaCard, shieldType, get) {
 }
 
 /**
- * 判断【杀】是否存在“无视防具”的例外（用于避免误判仁王盾/仁王金刚盾的无效杀）。
+ * 判断是否为无属性的普通【杀】。
+ *
+ * 说明：
+ * - 藤甲类防具只抵消普通【杀】，火杀/雷杀等属性杀仍应允许命中。
+ * - 部分引擎或扩展可能把普通杀 nature 标为 normal，这里将其视作无属性。
+ *
+ * @param {*} shaCard
+ * @param {*} get
+ * @returns {boolean}
+ */
+function isPlainShaCard(shaCard, get) {
+	if (!shaCard || String(shaCard?.name || shaCard?.viewAs || "") !== "sha") return false;
+	const natures = safeGetNatureList(shaCard, get).filter(n => n && n !== "normal");
+	return natures.length === 0;
+}
+
+/**
+ * 判断【杀】在“藤甲/重铸藤甲”存在时是否大概率无效。
+ *
+ * @param {*} shaCard
+ * @param {("tengjia"|"rewrite_tengjia")|null} armorType
+ * @param {*} get
+ * @returns {boolean}
+ */
+function isShaIneffectiveAgainstTengjia(shaCard, armorType, get) {
+	if (!shaCard || String(shaCard?.name || shaCard?.viewAs || "") !== "sha") return false;
+	if (armorType !== "tengjia" && armorType !== "rewrite_tengjia") return false;
+	return isPlainShaCard(shaCard, get);
+}
+
+/**
+ * 判断【杀】是否会被目标防具抵消。
+ *
+ * @param {*} shaCard
+ * @param {("renwang"|"rewrite_renwang"|"tengjia"|"rewrite_tengjia")|null} armorType
+ * @param {*} get
+ * @returns {boolean}
+ */
+function isShaIneffectiveAgainstArmor(shaCard, armorType, get) {
+	if (!armorType) return false;
+	if (armorType === "renwang" || armorType === "rewrite_renwang") return isShaIneffectiveAgainstRenwang(shaCard, armorType, get);
+	if (armorType === "tengjia" || armorType === "rewrite_tengjia") return isShaIneffectiveAgainstTengjia(shaCard, armorType, get);
+	return false;
+}
+
+/**
+ * 判断【杀】是否存在“无视防具”的例外（用于避免误判防具导致的无效杀）。
  *
  * 说明：
  * - 引擎层面对防具无视主要通过 source.hasSkillTag("unequip", false, {name,target,card}) 判定
- * - 同时兼容 unequip_ai（部分扩展/AI 口径会用该 tag 反映“视为无视防具”）
+ *
+ * @param {*} source
+ * @param {*} target
+ * @param {*} shaCard
+ * @returns {boolean}
+ */
+function isIneffectiveShaArmorBypassedBySource(source, target, shaCard) {
+	if (!source || !target || !shaCard) return false;
+	const name = String(shaCard?.name || shaCard?.viewAs || "");
+	/** @type {any} */
+	const arg = { name: name || null, target: target, card: shaCard };
+	return safeHasSkillTag(source, "unequip", false, arg);
+}
+
+/**
+ * 判断【杀】是否存在“无视防具”的例外（兼容仁王盾旧调用）。
  *
  * @param {*} source
  * @param {*} target
@@ -288,11 +366,7 @@ function isShaIneffectiveAgainstRenwang(shaCard, shieldType, get) {
  * @returns {boolean}
  */
 function isRenwangShieldBypassedBySource(source, target, shaCard) {
-	if (!source || !target || !shaCard) return false;
-	const name = String(shaCard?.name || shaCard?.viewAs || "");
-	/** @type {any} */
-	const arg = { name: name || null, target: target, card: shaCard };
-	return safeHasSkillTag(source, "unequip", false, arg) || safeHasSkillTag(source, "unequip_ai", false, arg);
+	return isIneffectiveShaArmorBypassedBySource(source, target, shaCard);
 }
 
 /**
@@ -2800,11 +2874,11 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 						if (!forcedTarget) return;
 						if (typeof get?.itemtype === "function" && get.itemtype(forcedTarget) !== "player") return;
 
-						// 仁王盾/仁王金刚盾：对无效【杀】直接禁用（避免“明知无效还浪费杀”）
+						// 仁王盾/藤甲等：对无效【杀】直接禁用（避免“明知无效还浪费杀”）
 						// - 例外：若本次【杀】存在“无视防具”的情况，则不禁用
-						const shieldType0 = getRenwangShieldType(forcedTarget, get);
-						if (shieldType0 && isShaIneffectiveAgainstRenwang(card, shieldType0, get)) {
-							if (!isRenwangShieldBypassedBySource(player, forcedTarget, card)) {
+						const armorType0 = getShaIneffectiveArmorType(forcedTarget, get);
+						if (armorType0 && isShaIneffectiveAgainstArmor(card, armorType0, get)) {
+							if (!isIneffectiveShaArmorBypassedBySource(player, forcedTarget, card)) {
 								ctx.score -= 9999;
 								return;
 							}
@@ -2851,13 +2925,9 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 									const delta = vToSource - vToMe;
 									if (delta > 0.5) donateBenefit += clampNumber(delta, 0, 4) * 0.18;
 
-									// 若这张【杀】对“仁王盾/仁王金刚盾”目标无效，则更倾向不出杀直接交武器（避免浪费无效杀）。
-									const shieldType = getRenwangShieldType(forcedTarget, get);
-									if (
-										shieldType &&
-										isShaIneffectiveAgainstRenwang(card, shieldType, get) &&
-										!isRenwangShieldBypassedBySource(player, forcedTarget, card)
-									) {
+									// 若这张【杀】对“防具”目标无效，则更倾向不出杀直接交武器（避免浪费无效杀）。
+									const armorType = getShaIneffectiveArmorType(forcedTarget, get);
+									if (armorType && isShaIneffectiveAgainstArmor(card, armorType, get) && !isIneffectiveShaArmorBypassedBySource(player, forcedTarget, card)) {
 										donateBenefit += 0.75;
 									}
 
@@ -4584,8 +4654,8 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 		);
 	}
 
-	// 通用策略：避免无效出杀（仁王盾/仁王金刚盾）
-	// - 目标装备盾且本次【杀】按颜色/花色会被抵消时，直接禁用该目标候选
+	// 通用策略：避免无效出杀（仁王盾/藤甲等）
+	// - 目标装备防具且本次【杀】按颜色/花色/属性会被抵消时，直接禁用该目标候选
 	// - 例外：若本次【杀】存在“无视防具”的情况，则不禁用
 	if (!game.__slqjAiPersona._shaAvoidIneffectiveRenwangHookInstalled) {
 		game.__slqjAiPersona._shaAvoidIneffectiveRenwangHookInstalled = true;
@@ -4604,14 +4674,23 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				const name = String(card?.name || card?.viewAs || "");
 				if (name !== "sha") return;
 
-				const shieldType = getRenwangShieldType(target, get);
-				if (!shieldType) return;
-				if (!isShaIneffectiveAgainstRenwang(card, shieldType, get)) return;
-				if (isRenwangShieldBypassedBySource(source, target, card)) return;
+				const armorType = getShaIneffectiveArmorType(target, get);
+				if (armorType && isShaIneffectiveAgainstArmor(card, armorType, get) && !isIneffectiveShaArmorBypassedBySource(source, target, card)) {
+					ctx.score -= 9999;
+					return;
+				}
 
-				ctx.score -= 9999;
+				// 非防具免伤标签兜底：目标本身会过滤/免疫本次伤害时，也避免选择该【杀】目标。
+				const damageArg = { player: source, card: card };
+				if (
+					safeHasSkillTag(target, "filterDamage", null, damageArg) ||
+					safeHasSkillTag(target, "nodamage", null, damageArg) ||
+					safeHasSkillTag(target, "noDirectDamage", null, damageArg)
+				) {
+					ctx.score -= 9999;
+				}
 			},
-			{ priority: 0, title: "通用策略：避免无效杀（仁王盾）" }
+			{ priority: 0, title: "通用策略：避免无效杀（防具）" }
 		);
 	}
 
