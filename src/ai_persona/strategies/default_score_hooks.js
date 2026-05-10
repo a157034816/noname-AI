@@ -2717,6 +2717,101 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 		);
 	}
 
+	// 通用策略：点数偏好 —— 轻度优先使用/弃掉点数小的牌（仅作并列决策的细粒度排序）
+	// 理由：保留大点数更利于后续拼点。
+	if (!game.__slqjAiPersona._lowPointPreferHookInstalled) {
+		game.__slqjAiPersona._lowPointPreferHookInstalled = true;
+		hooks.on(
+			"slqj_ai_score",
+			ctx => {
+				if (!ctx || ctx.kind !== "chooseCard" || ctx.stage !== "final") return;
+				if (typeof get?.itemtype === "function" && get.itemtype(ctx.candidate) !== "card") return;
+
+				const card = ctx.candidate;
+				const n0 = card?.number;
+				const num =
+					typeof n0 === "number" && !Number.isNaN(n0) ? n0 : Number.parseInt(typeof n0 === "string" ? n0 : String(n0 || ""), 10);
+				if (!(num >= 1 && num <= 13)) return;
+
+				// A=1, K=13：点数越小加分越多（最大约 +0.18），仅用于打破并列
+				ctx.score += (13 - num) * 0.015;
+			},
+			{ priority: 6, title: "通用策略：点数偏好（小点数优先）" }
+		);
+	}
+
+	// 通用策略：杀的用牌偏好 —— 普通杀 > 属性杀，黑杀 > 红杀（仅作轻量并列排序）
+	// 理由：用牌阶段倾向保留属性杀/红杀以备破藤甲、配合技能或对策仁王盾等。
+	if (!game.__slqjAiPersona._shaUsagePriorityHookInstalled) {
+		game.__slqjAiPersona._shaUsagePriorityHookInstalled = true;
+
+		// 1) 用牌场景：更优先打出普通杀与黑杀
+		hooks.on(
+			"slqj_ai_score",
+			ctx => {
+				if (!ctx || ctx.kind !== "chooseCard" || ctx.stage !== "final") return;
+				if (typeof get?.itemtype === "function" && get.itemtype(ctx.candidate) !== "card") return;
+				if (!isUseCardContext(ctx.event)) return;
+
+				const card = ctx.candidate;
+				if (String(card?.name || "") !== "sha") return;
+
+				// 属性杀判断：nature 可能是字符串或数组；只要包含 fire/thunder 即视为属性杀
+				const nature = card?.nature;
+				let isElementSha = false;
+				if (Array.isArray(nature)) {
+					isElementSha = nature.includes("fire") || nature.includes("thunder");
+				} else if (typeof nature === "string") {
+					isElementSha = nature.includes("fire") || nature.includes("thunder");
+				}
+
+				// 用牌：普通杀略优先（+0.15），属性杀略后置（-0.15）
+				ctx.score += isElementSha ? -0.15 : 0.15;
+
+				const suit = String(card?.suit || "");
+				const isBlack = suit === "spade" || suit === "club";
+				const isRed = suit === "heart" || suit === "diamond";
+				// 用牌：黑杀略优先（+0.15），红杀略后置（-0.15）
+				if (isBlack) ctx.score += 0.15;
+				else if (isRed) ctx.score += -0.15;
+			},
+			{ priority: 6, title: "通用策略：杀的用牌排序偏好" }
+		);
+
+		// 2) 弃牌场景：反过来 —— 更优先丢普通杀与黑杀，保留属性杀与红杀
+		hooks.on(
+			"slqj_ai_score",
+			ctx => {
+				if (!ctx || ctx.kind !== "chooseCard" || ctx.stage !== "final") return;
+				if (typeof get?.itemtype === "function" && get.itemtype(ctx.candidate) !== "card") return;
+				if (!isDiscardCardContext(ctx.event)) return;
+
+				const card = ctx.candidate;
+				if (String(card?.name || "") !== "sha") return;
+
+				// 属性杀判断：nature 可能是字符串或数组；只要包含 fire/thunder 即视为属性杀
+				const nature = card?.nature;
+				let isElementSha = false;
+				if (Array.isArray(nature)) {
+					isElementSha = nature.includes("fire") || nature.includes("thunder");
+				} else if (typeof nature === "string") {
+					isElementSha = nature.includes("fire") || nature.includes("thunder");
+				}
+
+				// 弃牌：普通杀更可丢（+0.15），属性杀更保留（-0.15）
+				ctx.score += isElementSha ? -0.15 : 0.15;
+
+				const suit = String(card?.suit || "");
+				const isBlack = suit === "spade" || suit === "club";
+				const isRed = suit === "heart" || suit === "diamond";
+				// 弃牌：黑杀更可丢（+0.15），红杀更保留（-0.15）
+				if (isBlack) ctx.score += 0.15;
+				else if (isRed) ctx.score += -0.15;
+			},
+			{ priority: 6, title: "通用策略：杀的弃牌保留偏好" }
+		);
+	}
+
 	// 通用策略：基本牌通用策略（回合外多留基本牌；杀/闪/酒保留偏好；温和“卖血保杀”；酒的“先喝酒再找牌”习惯）
 	if (!game.__slqjAiPersona._basicCardGeneralTipsHookInstalled) {
 		game.__slqjAiPersona._basicCardGeneralTipsHookInstalled = true;
