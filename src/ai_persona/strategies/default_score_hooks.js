@@ -2899,14 +2899,26 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 					if (ctx.event?.forced) return;
 					if (dying) return;
 
+					const src = findEventCard(ctx.event);
+					const srcName = String(src?.name || "");
+
+					// 隐藏忠臣/明忠未明置：主公发起决斗时不拼杀，乖乖掉血避免暴露/误伤主公节奏
+					if (
+						srcName === "juedou"
+						&& (player.identity === "zhong" || player.identity === "mingzhong")
+						&& !player.identityShown
+						&& (_status.event?.source === game.zhu || _status.event?.source?.identity === "zhu")
+					) {
+						ctx.score = -9999;
+						return;
+					}
+
 					const shaCount = safeCountCardsByName(player, "h", "sha");
 					if (hp < 3 || shaCount > 1) return;
 
-					const src = findEventCard(ctx.event);
-					const srcName = String(src?.name || "");
 					if (srcName !== "nanman" && srcName !== "juedou") return;
 
-					// 温和强度：只做轻度降权，避免把“明显该防的致命伤”也放掉
+					// 温和强度：只做轻度降权，避免把"明显该防的致命伤"也放掉
 					ctx.score -= 1.2;
 					return;
 				}
