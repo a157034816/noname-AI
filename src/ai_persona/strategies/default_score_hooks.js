@@ -2435,7 +2435,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 
 				// 仅约束“未暴露身份”：目标未明置，且软暴露不高
 				if (target.identityShown) return;
-				const shown = target.ai && typeof target.ai.shown === "number" ? target.ai.shown : 0;
+				const shown = clampNumber(target.ai && typeof target.ai.shown === "number" ? target.ai.shown : 0, 0, 1);
 				if (shown >= 0.85) return;
 
 				// 仅针对“有害行为”（对目标收益为负）
@@ -2474,7 +2474,12 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				const hp = typeof target.hp === "number" && !Number.isNaN(target.hp) ? target.hp : 0;
 				if (hp > 0 && hp <= 2) {
 					const base = typeof ctx.base === "number" && !Number.isNaN(ctx.base) ? ctx.base : 0;
-					const penalty = (hp <= 1 ? 4.8 : 3.2) + 0.12 * clampNumber(base, 0, 8);
+					// 1 血目标的“补刀惩罚”按软暴露程度递减：
+					// - shown>=0.85：视作足够明确，完全豁免
+					// - shown>=0.7：信息更明确，惩罚减半
+					// 其余情况保持原值（强约束“首轮对未知目标补刀收割”的倾向）
+					const shownPenaltyScale = hp <= 1 ? clampNumber(shown >= 0.85 ? 0 : shown >= 0.7 ? 0.5 : 1, 0, 1) : 1;
+					const penalty = (hp <= 1 ? 4.8 * shownPenaltyScale : 3.2) + 0.12 * clampNumber(base, 0, 8);
 					ctx.score -= penalty;
 				}
 			},
@@ -2519,7 +2524,9 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				for (const p of all) {
 					if (!p || p === player) continue;
 					if (typeof get?.itemtype === "function" && get.itemtype(p) !== "player") continue;
-					if (!p.identityShown) continue;
+					// 明置敌人判定：除 identityShown 外，允许“软暴露极高”视作已基本明置
+					const pShown = clampNumber(p.ai && typeof p.ai.shown === "number" ? p.ai.shown : 0, 0, 1);
+					if (!(p.identityShown || pShown >= 0.85)) continue;
 					const patt = safeAttitude(get, player, p);
 					if (patt >= -0.6) continue;
 					const ptv = getTargetUseValueFromEvent(player, p, ctx.event, get);
