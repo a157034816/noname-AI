@@ -3138,6 +3138,14 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 				const dist = getTurnOrderDistance(player, target, game);
 				if (!Number.isFinite(dist) || dist <= 0) return;
 
+				// 身份局：主公首轮“盲狙”保护——降低“近位还未行动更紧迫”的进攻加分幅度，
+				// 避免因座次导致的无意误伤（主公回合开始时其他人通常都满足“还未行动”，会放大对下家的偏好）。
+				const round =
+					typeof game?.roundNumber === "number" && !Number.isNaN(game.roundNumber) ? game.roundNumber : 0;
+				const selfId = String(player.identity || "");
+				const zhuRound1Protect = (selfId === "zhu" || player.isZhu) && round > 0 && round <= 1;
+				const zhuAttackBonusDiscount = zhuRound1Protect ? 0.4 : 1;
+
 				const cardName = String(card?.name || "");
 
 				// 1) 拆顺/攻击：优先“还没行动过”的目标（只做加分，不强行扣分）
@@ -3154,7 +3162,7 @@ export function installDefaultScoreHooks({ game, get, _status }) {
 							: cardName === "sha" || cardName === "juedou" || cardName === "huogong"
 								? 0.85
 								: 0.65;
-					const bonus = (0.55 + 0.65 * urgency) * kindScale;
+					const bonus = (0.55 + 0.65 * urgency) * kindScale * zhuAttackBonusDiscount;
 					ctx.score += bonus;
 					return;
 				}
