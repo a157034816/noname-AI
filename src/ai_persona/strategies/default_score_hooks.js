@@ -343,7 +343,6 @@ function isShaIneffectiveAgainstArmor(shaCard, armorType, get) {
  *
  * 说明：
  * - 引擎层面对防具无视主要通过 source.hasSkillTag("unequip", false, {name,target,card}) 判定
- * - 同时兼容 unequip_ai（部分扩展/AI 口径会用该 tag 反映“视为无视防具”）
  *
  * @param {*} source
  * @param {*} target
@@ -355,7 +354,7 @@ function isIneffectiveShaArmorBypassedBySource(source, target, shaCard) {
 	const name = String(shaCard?.name || shaCard?.viewAs || "");
 	/** @type {any} */
 	const arg = { name: name || null, target: target, card: shaCard };
-	return safeHasSkillTag(source, "unequip", false, arg) || safeHasSkillTag(source, "unequip_ai", false, arg);
+	return safeHasSkillTag(source, "unequip", false, arg);
 }
 
 /**
