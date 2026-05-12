@@ -1584,7 +1584,10 @@ export function shouldForbidRescueRecentAttackInChooseBool(chooseBoolEvent, play
 
 	for (const t of candidates) {
 		if (!t) continue;
-		if (getPid(t) === recent.targetPid) return true;
+		if (getPid(t) !== recent.targetPid) continue;
+		// 仅在“明确敌人”或“高置信敌对”时禁救；否则允许继续救主。
+		if (isExposedEnemyTarget(player, t, game, get)) return true;
+		return false;
 	}
 	return false;
 }
