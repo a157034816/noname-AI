@@ -333,6 +333,8 @@ HookBus 支持 `priority`（越大越先执行）：
   - `instakillWarBurstIntervalMs`: `180`
   - `instakillWarAnnounce`: `true`
   - `instakillWarOnlyOncePerGame`: `true`
+- `31_identity_mingcha_nonfan_favor.js`
+  - （无配置项）
 
 ---
 
@@ -586,6 +588,30 @@ HookBus 支持 `priority`（越大越先执行）：
 - 会显著改变观战体验/屏幕表情数量（尤其阶段 2 高频连丢）
 - 由于它不改变出牌/策略，属于纯“表现层互动”，适合想增强沉浸感但不想改强度的用户
   - 若触发“肢解鸡蛋大战”，可能出现更长时间的互砸/刷屏（可在脚本内关闭或调低概率）
+
+---
+
+### 6.8.1 `31_identity_mingcha_nonfan_favor.js`：明查非反好感补丁
+
+元信息：
+
+- name：明查非反好感补丁
+- version：1.0.0
+- 作用：补丁 `identity_mingcha`：当查到的不是反贼时，为本地 AI 观察者按身份补一层正向证据，让“非反”信息进入后续判断
+
+接入点：
+
+- 直接包装 `lib.skill.identity_mingcha.content`
+- 保留查到 `fan` 时的原始流程；只在非 `fan` 后为 tracked AI 观察者写入 `evidence`
+
+关键机制：
+
+- 证据方向统一走正向 `addEvidence(...)`，让现有身份猜测逻辑自行按观察者身份转不同阵营视角
+- 观察者权重：`zhu/zhong/mingzhong=1.0`，`fan=0.75`，`nei=0.35`，其他=0.25
+
+潜在副作用：
+
+- 只改变 AI 对“非反”目标的记忆，不改核心技能效果；因此不会影响展示逻辑或牌面结算
 
 ---
 
